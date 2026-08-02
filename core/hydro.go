@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"reflect"
 	"sync"
+	"time"
 )
 
 // hydroEventPath is the fixed endpoint the runtime script posts events to.
@@ -161,19 +162,37 @@ func (a *App) ensureSession(w http.ResponseWriter, r *http.Request) (string, err
 // hydroIDField returns the index of a component type's HydroID string field,
 // or -1 for a non-interactive component.
 func hydroIDField(t reflect.Type) int {
-	f, ok := t.FieldByName("HydroID")
+	return stringFieldIndex(t, "HydroID")
+}
+
+// stringFieldIndex returns the index of t's own (non-promoted) string field
+// with the given name, or -1 — the shape shared by the framework-populated
+// HydroID and CSRFToken fields.
+func stringFieldIndex(t reflect.Type, name string) int {
+	f, ok := t.FieldByName(name)
 	if ok && f.Type.Kind() == reflect.String && len(f.Index) == 1 {
 		return f.Index[0]
 	}
 	return -1
 }
 
+// action is one dispatchable allowlist entry: the handler's method index and
+// whether it takes the liquid.Event payload (D11), both resolved once at
+// registration.
+type action struct {
+	idx        int
+	takesEvent bool
+}
+
+// eventType is the reflect shape of the liquid.Event handler parameter.
+var eventType = reflect.TypeFor[Event]()
+
 // resolveActions maps a component's compiled allowlist to method indexes,
 // once, at registration. Dispatch later selects among these precomputed
 // entries — it never reflects on a client-supplied name. A component whose
 // allowlist names a missing or mis-shaped method breaks the compiler contract
 // and fails registration loudly.
-func resolveActions(v reflect.Value) (map[string]int, error) {
+func resolveActions(v reflect.Value) (map[string]action, error) {
 	ap, ok := v.Interface().(ActionProvider)
 	if !ok {
 		return nil, nil
@@ -182,16 +201,18 @@ func resolveActions(v reflect.Value) (map[string]int, error) {
 	if hydroIDField(v.Elem().Type()) < 0 {
 		return nil, fmt.Errorf("component %s declares actions but has no HydroID string field to patch against", structName)
 	}
-	actions := make(map[string]int)
+	actions := make(map[string]action)
 	for _, name := range ap.Actions() {
 		m, ok := v.Type().MethodByName(name)
 		if !ok {
 			return nil, fmt.Errorf("allowlisted action %s has no method on %s", name, structName)
 		}
-		if m.Type.NumIn() != 1 || m.Type.NumOut() != 0 {
-			return nil, fmt.Errorf("allowlisted action %s.%s must have signature func(), got %s", structName, name, m.Type)
+		takesEvent := m.Type.NumIn() == 2 && m.Type.In(1) == eventType
+		if m.Type.NumOut() != 0 || (m.Type.NumIn() != 1 && !takesEvent) {
+			return nil, fmt.Errorf("allowlisted action %s.%s must have signature func() or func(e liquid.Event), got %s",
+				structName, name, m.Type)
 		}
-		actions[name] = m.Index
+		actions[name] = action{idx: m.Index, takesEvent: takesEvent}
 	}
 	return actions, nil
 }
@@ -205,8 +226,10 @@ type Envelope struct {
 
 // hydroEvent is the payload the runtime script posts.
 type hydroEvent struct {
-	HydroID string `json:"hydroId"`
-	Action  string `json:"action"`
+	HydroID   string            `json:"hydroId"`
+	Action    string            `json:"action"`
+	Payload   map[string]string `json:"payload"`
+	CSRFToken string            `json:"csrfToken"`
 }
 
 // serveHydroEvent dispatches one posted event: resolve the live instance
@@ -230,21 +253,44 @@ func (a *App) serveHydroEvent(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	// CSRF comes before anything the event names: a request that cannot
+	// prove it originated from a page this server rendered for this session
+	// learns nothing about tokens or actions (D15).
+	if !validCSRF(a.csrfSecret, ev.CSRFToken, ck.Value, time.Now()) {
+		http.Error(w, "invalid csrf token", http.StatusForbidden)
+		return
+	}
 	st := a.hydro.get(ck.Value, ev.HydroID)
 	if st == nil {
 		http.NotFound(w, r)
 		return
 	}
-	idx, ok := st.rt.actions[ev.Action]
+	act, ok := st.rt.actions[ev.Action]
 	if !ok {
 		http.NotFound(w, r)
 		return
 	}
 
+	reply := &eventReply{}
+	var args []reflect.Value
+	if act.takesEvent {
+		args = []reflect.Value{reflect.ValueOf(Event{
+			Ctx:    NewCtx(r, nil),
+			fields: ev.Payload,
+			reply:  reply,
+		})}
+	}
+
 	st.mu.Lock()
-	st.inst.Method(idx).Call(nil)
-	var buf bytes.Buffer
-	renderErr := st.rt.tmpl.Execute(&buf, st.inst.Interface())
+	st.inst.Method(act.idx).Call(args)
+	env := Envelope{Redirect: reply.redirect}
+	var renderErr error
+	if env.Redirect == "" {
+		// Only a patch answer needs the re-render (D19).
+		var buf bytes.Buffer
+		renderErr = st.rt.tmpl.Execute(&buf, st.inst.Interface())
+		env.Patch = buf.String()
+	}
 	st.mu.Unlock()
 	if renderErr != nil {
 		a.logger.Error("rendering event patch", "action", ev.Action, "error", renderErr)
@@ -253,7 +299,7 @@ func (a *App) serveHydroEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	if err := json.NewEncoder(w).Encode(Envelope{Patch: buf.String()}); err != nil {
+	if err := json.NewEncoder(w).Encode(env); err != nil {
 		a.logger.Error("writing event envelope", "error", err)
 	}
 }

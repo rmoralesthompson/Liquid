@@ -45,6 +45,9 @@ const (
 	// CodeMissingHydroRoot reports an event binding in a template that never
 	// declares a [hydroId] patch boundary.
 	CodeMissingHydroRoot Code = "LSX010"
+	// CodeMissingCSRFField reports a template with a <form> on a component
+	// whose struct lacks the CSRFToken string field the framework fills (D15).
+	CodeMissingCSRFField Code = "LSX011"
 )
 
 // Diagnostic is one structured compiler finding: the literal contract an

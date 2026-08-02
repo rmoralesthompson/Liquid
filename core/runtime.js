@@ -51,11 +51,23 @@
     }
   }
 
-  async function fire(root, action) {
+  // csrfToken reads the render's CSRF token from the meta tag the document
+  // shell stamps (D15); the server refuses events without it.
+  function csrfToken() {
+    const meta = document.querySelector('meta[name="liquid-csrf"]');
+    return meta ? meta.content : "";
+  }
+
+  async function fire(root, action, payload) {
     const res = await fetch("/hydro-event", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ hydroId: root.dataset.hydroId, action }),
+      body: JSON.stringify({
+        hydroId: root.dataset.hydroId,
+        action,
+        payload,
+        csrfToken: csrfToken(),
+      }),
     });
     if (!res.ok) return;
     const env = await res.json();
@@ -73,6 +85,20 @@
     const root = bound.closest("[data-hydro-id]");
     if (!root) return;
     e.preventDefault();
-    fire(root, bound.dataset.liquidAction);
+    fire(root, bound.dataset.liquidAction, undefined);
+  });
+
+  document.addEventListener("submit", (e) => {
+    const form = e.target;
+    if (!(form instanceof HTMLFormElement)) return;
+    const action = form.getAttribute("data-liquid-submit");
+    if (!action) return;
+    const root = form.closest("[data-hydro-id]");
+    if (!root) return;
+    e.preventDefault();
+    // Serialize the form as single-valued fields (v0.1); the auto-injected
+    // csrf_token input rides along harmlessly beside the top-level token.
+    const payload = Object.fromEntries(new FormData(form));
+    fire(root, action, payload);
   });
 })();

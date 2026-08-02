@@ -28,7 +28,7 @@ type HeadProvider interface {
 // component supplies the body, Head supplies title and meta. The shell is
 // what makes a route a complete document without a separate layout system.
 const shellHTML = `<!doctype html>
-<html><head><meta charset="utf-8"><title>{{.Head.Title}}</title>{{range .Head.Meta}}<meta name="{{.Name}}" content="{{.Content}}">{{end}}<script src="/liquid/runtime.js" defer></script></head>
+<html><head><meta charset="utf-8"><title>{{.Head.Title}}</title>{{range .Head.Meta}}<meta name="{{.Name}}" content="{{.Content}}">{{end}}{{if .CSRF}}<meta name="liquid-csrf" content="{{.CSRF}}">{{end}}<script src="/liquid/runtime.js" defer></script></head>
 <body>{{.Body}}</body></html>
 `
 
@@ -36,8 +36,11 @@ const shellHTML = `<!doctype html>
 var shellTmpl = template.Must(template.New("shell").Parse(shellHTML))
 
 // shellData feeds one shell execution. Body is the already-escaped component
-// render — trusted HTML by construction, not raw input.
+// render — trusted HTML by construction, not raw input. CSRF is the render's
+// token, stamped as a liquid-csrf meta tag for the runtime script to send
+// with event payloads (D15); empty for session-less pages.
 type shellData struct {
 	Head Head
+	CSRF string
 	Body template.HTML
 }

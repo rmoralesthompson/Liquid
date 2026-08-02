@@ -20,7 +20,7 @@ const maxSuggestionDistance = 2
 // verifies that every template interpolation naming a simple identifier
 // resolves to a field or method on the paired struct. Expressions that are
 // not plain identifiers are left for html/template to judge.
-func vetReferences(ctx context.Context, dir, lsxPath, structName string, interps []interpolation) ([]Diagnostic, error) {
+func vetReferences(ctx context.Context, dir, lsxPath, structName string, interps []structRef) ([]Diagnostic, error) {
 	cfg := &packages.Config{
 		Context: ctx,
 		// NeedSyntax and NeedTypesInfo make packages type-check from source
@@ -68,6 +68,12 @@ func vetReferences(ctx context.Context, dir, lsxPath, structName string, interps
 			}
 			continue
 		}
+		if in.kind == refCSRFRoot {
+			if d := checkCSRFField(lsxPath, structName, in, pairedType, pkg.Types); d != nil {
+				diags = append(diags, *d)
+			}
+			continue
+		}
 		name := strings.TrimPrefix(in.expr, ".")
 		if !isSimpleIdent(name) {
 			continue
@@ -101,12 +107,9 @@ func vetReferences(ctx context.Context, dir, lsxPath, structName string, interps
 // HydroID field the framework fills at render: a field (not a method) whose
 // underlying type is string. Anything else is an LSX009, or nil when the
 // plumbing is in place.
-func checkHydroField(lsxPath, structName string, in interpolation, pairedType types.Type, pkg *types.Package) *Diagnostic {
-	member, _, _ := types.LookupFieldOrMethod(pairedType, true, pkg, "HydroID")
-	if v, ok := member.(*types.Var); ok {
-		if basic, ok := v.Type().Underlying().(*types.Basic); ok && basic.Kind() == types.String {
-			return nil
-		}
+func checkHydroField(lsxPath, structName string, in structRef, pairedType types.Type, pkg *types.Package) *Diagnostic {
+	if hasStringField(pairedType, pkg, "HydroID") {
+		return nil
 	}
 	return &Diagnostic{
 		File:     lsxPath,
@@ -120,32 +123,87 @@ func checkHydroField(lsxPath, structName string, in interpolation, pairedType ty
 	}
 }
 
+// checkCSRFField verifies that a component whose template has a <form>
+// carries the CSRFToken field the framework fills at render (D15): a field
+// (not a method) whose underlying type is string. Anything else is an
+// LSX011, or nil when the plumbing is in place.
+func checkCSRFField(lsxPath, structName string, in structRef, pairedType types.Type, pkg *types.Package) *Diagnostic {
+	if hasStringField(pairedType, pkg, "CSRFToken") {
+		return nil
+	}
+	return &Diagnostic{
+		File:     lsxPath,
+		Line:     in.line,
+		Col:      in.col,
+		Severity: SeverityError,
+		Code:     CodeMissingCSRFField,
+		Message: fmt.Sprintf("%s has a <form> but no CSRFToken string field for the framework to fill",
+			structName),
+		Suggestion: fmt.Sprintf("add CSRFToken string to the %s struct", structName),
+	}
+}
+
+// hasStringField reports whether t carries a field (not a method) named name
+// whose underlying type is string.
+func hasStringField(t types.Type, pkg *types.Package, name string) bool {
+	member, _, _ := types.LookupFieldOrMethod(t, true, pkg, name)
+	v, ok := member.(*types.Var)
+	if !ok {
+		return false
+	}
+	basic, ok := v.Type().Underlying().(*types.Basic)
+	return ok && basic.Kind() == types.String
+}
+
 // checkHandler verifies that an event-binding target is a dispatchable
-// handler: a method with no parameters and no results (the v0.1 half of D11 —
-// the liquid.Event variant arrives with (submit) payloads). Anything else is
-// an LSX008, or nil when the handler is fine.
-func checkHandler(lsxPath, structName string, in interpolation, member types.Object) *Diagnostic {
+// handler: a method shaped func() or func(e liquid.Event), the two shapes
+// D11 allows. Anything else is an LSX008, or nil when the handler is fine.
+func checkHandler(lsxPath, structName string, in structRef, member types.Object) *Diagnostic {
 	d := &Diagnostic{
-		File:       lsxPath,
-		Line:       in.line,
-		Col:        in.col,
-		Severity:   SeverityError,
-		Code:       CodeInvalidHandler,
-		Suggestion: fmt.Sprintf("change the method to func (c *%s) %s()", structName, in.expr),
+		File:     lsxPath,
+		Line:     in.line,
+		Col:      in.col,
+		Severity: SeverityError,
+		Code:     CodeInvalidHandler,
+		Suggestion: fmt.Sprintf("change the method to func (c *%s) %s() or func (c *%s) %s(e liquid.Event)",
+			structName, in.expr, structName, in.expr),
 	}
 	fn, ok := member.(*types.Func)
 	if !ok {
-		d.Message = fmt.Sprintf("(click) handler %s is a field, not a method", in.expr)
+		d.Message = fmt.Sprintf("%s handler %s is a field, not a method", in.binding, in.expr)
 		d.Suggestion = fmt.Sprintf("add a method func (c *%s) %s() and bind that instead", structName, in.expr)
 		return d
 	}
 	sig := fn.Type().(*types.Signature)
-	if sig.Params().Len() == 0 && sig.Results().Len() == 0 {
-		return nil
+	if sig.Results().Len() == 0 {
+		switch sig.Params().Len() {
+		case 0:
+			return nil
+		case 1:
+			if isLiquidEvent(sig.Params().At(0).Type()) {
+				return nil
+			}
+		}
 	}
-	d.Message = fmt.Sprintf("(click) handler %s has signature %s; a v0.1 click handler takes no arguments and returns nothing",
-		in.expr, fn.Type())
+	// Qualify types by bare package name so the signature reads as the
+	// author wrote it (liquid.Event), not as a full import path.
+	d.Message = fmt.Sprintf("%s handler %s has signature %s; a handler is func() or func(e liquid.Event) (D11)",
+		in.binding, in.expr, types.TypeString(fn.Type(), func(p *types.Package) string { return p.Name() }))
 	return d
+}
+
+// liquidCorePath is the import path liquid.Event resolves at; handler
+// signatures are matched against it by path, not by loading the package here.
+const liquidCorePath = "github.com/rmoralesthompson/liquid/core"
+
+// isLiquidEvent reports whether t is the liquid.Event payload type (D11).
+func isLiquidEvent(t types.Type) bool {
+	n, ok := t.(*types.Named)
+	if !ok {
+		return false
+	}
+	obj := n.Obj()
+	return obj.Name() == "Event" && obj.Pkg() != nil && obj.Pkg().Path() == liquidCorePath
 }
 
 // brokenPackageDiags translates go/types errors from the paired package into

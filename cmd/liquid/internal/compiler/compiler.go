@@ -216,6 +216,9 @@ func transform(n *html.Node, actions *[]string) error {
 		if err := applyBindings(n, actions); err != nil {
 			return err
 		}
+		if n.DataAtom == atom.Form {
+			injectCSRFInput(n)
+		}
 	}
 	for i := range n.Attr {
 		n.Attr[i].Val = rewriteInterpolations(n.Attr[i].Val)
@@ -243,6 +246,22 @@ func applyBindings(n *html.Node, actions *[]string) error {
 		}
 	}
 	return nil
+}
+
+// injectCSRFInput appends the hidden CSRF token input every <form> carries
+// (D15). The value interpolates the CSRFToken field the framework populates
+// per render; vet guarantees the paired struct declares it.
+func injectCSRFInput(form *html.Node) {
+	form.AppendChild(&html.Node{
+		Type:     html.ElementNode,
+		Data:     "input",
+		DataAtom: atom.Input,
+		Attr: []html.Attribute{
+			{Key: "type", Val: "hidden"},
+			{Key: "name", Val: "csrf_token"},
+			{Key: "value", Val: "{{ .CSRFToken }}"},
+		},
+	})
 }
 
 // quoteAll renders names as a comma-separated list of quoted Go string

@@ -7,7 +7,6 @@ package liquidtest
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -90,18 +89,75 @@ func (p *Page) HydroID() string {
 	return id
 }
 
+// CSRFToken returns the page's CSRF token as the runtime script reads it —
+// the liquid-csrf meta tag the shell stamps on interactive renders — or ""
+// for a page without one.
+func (p *Page) CSRFToken() string {
+	var token string
+	walk(p.doc, func(n *html.Node) bool {
+		if name, ok := attr(n, "name"); ok && n.Data == "meta" && name == "liquid-csrf" {
+			token, _ = attr(n, "content")
+			return false
+		}
+		return true
+	})
+	return token
+}
+
+// FireOption adjusts one Fire call away from the faithful-browser default.
+type FireOption func(*fireConfig)
+
+type fireConfig struct {
+	csrf   *string
+	fields map[string]string
+}
+
+// CSRF overrides the token Fire sends — standing in for a forged or stolen
+// token. The default is the page's own CSRFToken.
+func CSRF(token string) FireOption {
+	return func(c *fireConfig) { c.csrf = &token }
+}
+
+// Field adds one payload field to the event, as the runtime script's form
+// serialization would for a (submit).
+func Field(name, value string) FireOption {
+	return func(c *fireConfig) {
+		if c.fields == nil {
+			c.fields = make(map[string]string)
+		}
+		c.fields[name] = value
+	}
+}
+
 // Fire posts the named action for this page's hydro session, as the runtime
-// script would, and returns the decoded response. A refused event (an
-// unknown action or token is a 404) comes back with Code set and an empty
+// script would — carrying the page's CSRF token unless overridden — and
+// returns the decoded response. A refused event (an unknown action or token
+// is a 404, a bad CSRF token a 403) comes back with Code set and an empty
 // envelope, so refusals are assertable; an undecodable 200 fails the test.
-func (p *Page) Fire(action string) *Patch {
+func (p *Page) Fire(action string, opts ...FireOption) *Patch {
 	p.h.t.Helper()
 	hydroID := p.HydroID()
 	if hydroID == "" {
 		p.h.t.Fatal("liquidtest: Fire on a page with no data-hydro-id; is the component interactive?")
 	}
-	payload := fmt.Sprintf(`{"hydroId":%q,"action":%q}`, hydroID, action)
-	req := httptest.NewRequest(http.MethodPost, "/hydro-event", strings.NewReader(payload))
+	cfg := fireConfig{}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	csrf := p.CSRFToken()
+	if cfg.csrf != nil {
+		csrf = *cfg.csrf
+	}
+	payload, err := json.Marshal(map[string]any{
+		"hydroId":   hydroID,
+		"action":    action,
+		"payload":   cfg.fields,
+		"csrfToken": csrf,
+	})
+	if err != nil {
+		p.h.t.Fatalf("liquidtest: encoding event payload: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/hydro-event", strings.NewReader(string(payload)))
 	req.Header.Set("Content-Type", "application/json")
 	rec := p.h.do(req)
 	patch := &Patch{h: p.h, Code: rec.Code}
@@ -109,8 +165,8 @@ func (p *Page) Fire(action string) *Patch {
 		patch.doc = &html.Node{Type: html.DocumentNode}
 		return patch
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &patch.Envelope); err != nil {
-		p.h.t.Fatalf("liquidtest: firing %s: response is not an envelope: %v", action, err)
+	if decodeErr := json.Unmarshal(rec.Body.Bytes(), &patch.Envelope); decodeErr != nil {
+		p.h.t.Fatalf("liquidtest: firing %s: response is not an envelope: %v", action, decodeErr)
 	}
 	doc, err := html.Parse(strings.NewReader(patch.Envelope.Patch))
 	if err != nil {

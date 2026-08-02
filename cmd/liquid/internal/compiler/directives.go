@@ -8,18 +8,15 @@ import (
 )
 
 // directive is one directive or binding attribute found in raw .lsx source,
-// positioned at the first byte of its expression (1-based line, 1-based byte
-// column) so a diagnostic points at what the author should edit. nameLine and
-// nameCol point at the attribute name itself, for diagnostics about the
-// attribute rather than its expression.
+// positioned at the first byte of its expression so a diagnostic points at
+// what the author should edit. namePos points at the attribute name itself,
+// for diagnostics about the attribute rather than its expression.
 type directive struct {
-	name     string // canonical spelling: *goIf, *goFor, (click), [hydroId]
-	expr     string
-	line     int
-	col      int
-	nameLine int
-	nameCol  int
-	tag      int // ordinal of the enclosing < tag, for the one-per-element rule
+	name string // canonical spelling: *goIf, *goFor, (click), [hydroId]
+	expr string
+	pos
+	namePos pos
+	tag     int // ordinal of the enclosing < tag, for the one-per-element rule
 }
 
 // cursor walks a byte slice tracking the 1-based line and byte column of the
@@ -114,6 +111,10 @@ func scanDirectives(src []byte) []directive {
 			if c.peek() == '<' {
 				inTag = true
 				tag++
+				if c.foldPrefix("<form") && c.boundaryAt(len("<form")) {
+					at := pos{line: c.line, col: c.col}
+					dirs = append(dirs, directive{name: "<form>", tag: tag, pos: at, namePos: at})
+				}
 			}
 			c.advance(1)
 			continue
@@ -145,10 +146,14 @@ func scanDirectives(src []byte) []directive {
 }
 
 // matchKind reports which directive kind, if any, starts an attribute at the
-// cursor.
+// cursor. Tag-level kinds (<form>) are recognized by the tag scanner, never
+// as attributes.
 func (c *cursor) matchKind() *directiveKind {
 	for i := range directiveKinds {
 		k := &directiveKinds[i]
+		if k.lowered[0] == '<' {
+			continue
+		}
 		if c.foldPrefix(k.lowered) && c.boundaryAt(len(k.lowered)) {
 			return k
 		}
@@ -160,10 +165,10 @@ func (c *cursor) matchKind() *directiveKind {
 // returning the directive positioned at its expression. ok is false when a
 // quoted value has no closing quote, which ends the caller's scan.
 func (c *cursor) scanDirectiveValue(name string, tag int) (directive, bool) {
-	nameLine, nameCol := c.line, c.col
+	namePos := pos{line: c.line, col: c.col}
 	c.advance(len(name))
 	c.skipSpace()
-	d := directive{name: name, tag: tag, line: c.line, col: c.col, nameLine: nameLine, nameCol: nameCol}
+	d := directive{name: name, tag: tag, pos: pos{line: c.line, col: c.col}, namePos: namePos}
 	if c.done() || c.peek() != '=' {
 		return d, true // valueless attribute: empty expression
 	}
@@ -173,7 +178,7 @@ func (c *cursor) scanDirectiveValue(name string, tag int) (directive, bool) {
 		q := c.peek()
 		c.advance(1)
 		c.skipSpace()
-		d.line, d.col = c.line, c.col
+		d.pos = pos{line: c.line, col: c.col}
 		valLen := bytes.IndexByte(c.src[c.i:], q)
 		if valLen < 0 {
 			return d, false
@@ -182,7 +187,7 @@ func (c *cursor) scanDirectiveValue(name string, tag int) (directive, bool) {
 		c.advance(valLen + 1)
 		return d, true
 	}
-	d.line, d.col = c.line, c.col
+	d.pos = pos{line: c.line, col: c.col}
 	start := c.i
 	for !c.done() && !isUnquotedValueEnd(c.peek()) {
 		c.advance(1)
@@ -246,7 +251,7 @@ func checkHydroRoot(file string, dirs []directive) *Diagnostic {
 		if d.name == "[hydroId]" {
 			return nil
 		}
-		if d.name == "(click)" && firstBinding == nil {
+		if k := kindByCanonical(d.name); k != nil && k.action && firstBinding == nil {
 			firstBinding = &dirs[i]
 		}
 	}
@@ -255,12 +260,12 @@ func checkHydroRoot(file string, dirs []directive) *Diagnostic {
 	}
 	return &Diagnostic{
 		File:     file,
-		Line:     firstBinding.nameLine,
-		Col:      firstBinding.nameCol,
+		Line:     firstBinding.namePos.line,
+		Col:      firstBinding.namePos.col,
 		Severity: SeverityError,
 		Code:     CodeMissingHydroRoot,
-		Message: fmt.Sprintf("(click) needs a patch boundary, but no element in %s declares [hydroId]",
-			filepath.Base(file)),
+		Message: fmt.Sprintf("%s needs a patch boundary, but no element in %s declares [hydroId]",
+			firstBinding.name, filepath.Base(file)),
 		Suggestion: "add [hydroId] to the component's root element",
 	}
 }
@@ -290,8 +295,8 @@ func isFieldPath(s string) bool {
 // a *goIf condition, a *goFor list, a (click) handler, a [hydroId]
 // declaration — as positioned expressions for the vet cross-check, each
 // kind's ref extractor deciding what there is to check.
-func directiveRefs(dirs []directive) []interpolation {
-	var refs []interpolation
+func directiveRefs(dirs []directive) []structRef {
+	var refs []structRef
 	for _, d := range dirs {
 		k := kindByCanonical(d.name)
 		if k == nil || k.ref == nil {

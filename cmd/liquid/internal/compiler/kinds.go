@@ -15,12 +15,13 @@ type directiveKind struct {
 	canonical  string // author-facing spelling: *goIf
 	lowered    string // scanner/HTML-parser spelling: *goif
 	structural bool   // wraps its element in a control block; at most one per element
+	action     bool   // event binding dispatching to a handler; needs a [hydroId] boundary
 	// check validates the directive's expression grammar, returning a
 	// diagnostic for a malformed one; nil means any expression is accepted.
 	check func(file string, d directive) *Diagnostic
 	// ref extracts the struct reference the expression makes for the vet
 	// cross-check; ok is false when there is nothing to check.
-	ref func(d directive) (interpolation, bool)
+	ref func(d directive) (structRef, bool)
 	// rewrite applies the kind's node-tree transform to attribute i of n,
 	// appending any bound action names to actions.
 	rewrite func(n *html.Node, i int, actions *[]string) error
@@ -47,14 +48,31 @@ var directiveKinds = []directiveKind{
 	{
 		canonical: "(click)",
 		lowered:   "(click)",
+		action:    true,
 		ref:       actionRef,
 		rewrite:   rewriteClick,
+	},
+	{
+		canonical: "(submit)",
+		lowered:   "(submit)",
+		action:    true,
+		ref:       actionRef,
+		rewrite:   rewriteSubmit,
 	},
 	{
 		canonical: "[hydroId]",
 		lowered:   "[hydroid]",
 		ref:       hydroRootRef,
 		rewrite:   rewriteHydroID,
+	},
+	{
+		// <form> is a tag-level kind, not an attribute: the tag scanner
+		// records it (never matchKind), and its only role is asking vet to
+		// verify the CSRFToken plumbing (D15). The CSRF input injection is a
+		// node-tree transform keyed on the form element itself.
+		canonical: "<form>",
+		lowered:   "<form>",
+		ref:       csrfRootRef,
 	},
 }
 
@@ -120,34 +138,40 @@ func checkGoForExpr(file string, d directive) *Diagnostic {
 // fieldExprRef treats the whole expression as a struct reference.
 // Loop-variable references ($var) resolve at render time, not against the
 // struct, so they yield nothing to check.
-func fieldExprRef(d directive) (interpolation, bool) {
+func fieldExprRef(d directive) (structRef, bool) {
 	if strings.HasPrefix(d.expr, "$") {
-		return interpolation{}, false
+		return structRef{}, false
 	}
-	return interpolation{expr: d.expr, line: d.line, col: d.col, kind: refField}, true
+	return structRef{expr: d.expr, pos: d.pos, kind: refField}, true
 }
 
 // goForListRef extracts the list half of a *goFor expression, positioned at
 // the list's own first byte.
-func goForListRef(d directive) (interpolation, bool) {
+func goForListRef(d directive) (structRef, bool) {
 	_, list, ok := parseGoFor(d.expr)
 	if !ok || strings.HasPrefix(list, "$") {
-		return interpolation{}, false
+		return structRef{}, false
 	}
 	line, col := advancePos(d.line, d.col, d.expr[:strings.LastIndex(d.expr, list)])
-	return interpolation{expr: list, line: line, col: col}, true
+	return structRef{expr: list, pos: pos{line: line, col: col}}, true
 }
 
 // actionRef marks the expression as an event-handler reference, which vet
 // holds to the dispatchable-method rules rather than any-field-or-method.
-func actionRef(d directive) (interpolation, bool) {
-	return interpolation{expr: d.expr, line: d.line, col: d.col, kind: refAction}, true
+func actionRef(d directive) (structRef, bool) {
+	return structRef{expr: d.expr, pos: d.pos, kind: refAction, binding: d.name}, true
 }
 
 // hydroRootRef asks vet to verify the HydroID plumbing on the paired struct,
 // anchored at the [hydroId] attribute itself.
-func hydroRootRef(d directive) (interpolation, bool) {
-	return interpolation{line: d.nameLine, col: d.nameCol, kind: refHydroRoot}, true
+func hydroRootRef(d directive) (structRef, bool) {
+	return structRef{pos: d.namePos, kind: refHydroRoot}, true
+}
+
+// csrfRootRef asks vet to verify the CSRFToken plumbing on the paired struct,
+// anchored at the <form> tag itself.
+func csrfRootRef(d directive) (structRef, bool) {
+	return structRef{pos: d.namePos, kind: refCSRFRoot}, true
 }
 
 // rewriteGoIf wraps the element in the {{if}} block its condition compiles
@@ -179,6 +203,15 @@ func rewriteGoFor(n *html.Node, i int, _ *[]string) error {
 // compiled allowlist.
 func rewriteClick(n *html.Node, i int, actions *[]string) error {
 	n.Attr[i].Key = "data-liquid-action"
+	*actions = append(*actions, n.Attr[i].Val)
+	return nil
+}
+
+// rewriteSubmit turns (submit)="Method" into data-liquid-submit="Method" —
+// the hook the runtime script's submit listener keys on — and adds Method to
+// the compiled allowlist.
+func rewriteSubmit(n *html.Node, i int, actions *[]string) error {
+	n.Attr[i].Key = "data-liquid-submit"
 	*actions = append(*actions, n.Attr[i].Val)
 	return nil
 }

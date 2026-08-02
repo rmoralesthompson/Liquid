@@ -104,7 +104,7 @@ A reflection-based injector: services registered by type, components declare dep
 ### Security model
 
 - **XSS:** all interpolation flows through `html/template` contextual escaping; blueprint/catalog templates are pre-vetted and parameterized, so agents never inject raw markup.
-- **CSRF:** HMAC-signed, expiring tokens bound to session ID, auto-injected into forms and hydro-event payloads, validated before any action dispatch.
+- **CSRF:** HMAC-signed, expiring tokens bound to session ID, auto-injected into forms and hydro-event payloads, validated before any action dispatch. The document shell stamps the render's token as a `<meta name="liquid-csrf">` tag — that is where the runtime script reads the `csrfToken` it sends with every event, forms included; the form's hidden `csrf_token` input carries the same token for non-JS submission paths.
 - **Action dispatch:** compile-time allowlist per component; unknown actions are 404s.
 - **Session tokens:** random, opaque, idle-expiring. No memory addresses, ever.
 - **Server-side secrecy:** API keys, prompts, and business logic never leave the server — inherent to the model.

@@ -29,21 +29,12 @@ func (c *compiledHello) Selector() string { return "app-hello" }
 
 func (c *compiledHello) Template() string { return c.text }
 
-// copyFixtureDir copies every file in src into dst.
+// copyFixtureDir copies the fixture tree rooted at src into dst, including
+// any liquidstub module a fixture's go.mod replace points at.
 func copyFixtureDir(t *testing.T, src, dst string) {
 	t.Helper()
-	entries, err := os.ReadDir(src)
-	if err != nil {
-		t.Fatalf("reading fixture: %v", err)
-	}
-	for _, e := range entries {
-		data, readErr := os.ReadFile(filepath.Join(src, e.Name()))
-		if readErr != nil {
-			t.Fatalf("reading fixture file %s: %v", e.Name(), readErr)
-		}
-		if writeErr := os.WriteFile(filepath.Join(dst, e.Name()), data, 0o644); writeErr != nil {
-			t.Fatalf("copying fixture file %s: %v", e.Name(), writeErr)
-		}
+	if err := os.CopyFS(dst, os.DirFS(src)); err != nil {
+		t.Fatalf("copying fixture %s: %v", src, err)
 	}
 }
 
@@ -125,6 +116,63 @@ func TestBuildThenClickRoundTripsEndToEnd(t *testing.T) {
 	}
 	if got := page.Fire("Increment").Text("#count"); got != "1" {
 		t.Errorf(`patch Text("#count") = %q, want "1"`, got)
+	}
+}
+
+// renamerGen holds what liquid build generated for the renamer fixture.
+var renamerGen struct {
+	text    string
+	actions []string
+}
+
+// compiledRenamer pairs the renamer fixture's struct shape with the compiler
+// output, joining the (submit)/CSRF compile seam to the hydro runtime seam.
+type compiledRenamer struct {
+	HydroID   string
+	CSRFToken string
+	Title     string
+}
+
+func (c *compiledRenamer) Selector() string { return "app-renamer" }
+
+func (c *compiledRenamer) Template() string { return renamerGen.text }
+
+func (c *compiledRenamer) Actions() []string { return renamerGen.actions }
+
+// Rename mirrors the fixture's (submit) handler.
+func (c *compiledRenamer) Rename(e liquid.Event) { c.Title = e.String("title") }
+
+func TestBuildThenSubmitRoundTripsEndToEnd(t *testing.T) {
+	dir := t.TempDir()
+	copyFixtureDir(t, filepath.Join("internal", "compiler", "testdata", "renamer"), dir)
+
+	if err := run([]string{"build", dir}, io.Discard); err != nil {
+		t.Fatalf("liquid build: %v", err)
+	}
+	genPath := filepath.Join(dir, "renamer_gen.go")
+	renamerGen.text = generatedTemplateText(t, genPath)
+	renamerGen.actions = generatedActions(t, genPath)
+
+	app := liquid.New()
+	if err := app.Route("/", &compiledRenamer{Title: "Untitled"}); err != nil {
+		t.Fatalf("Route: %v", err)
+	}
+
+	h := liquidtest.New(t, app)
+	page := h.Get("/")
+	if got := page.Text("#title"); got != "Untitled" {
+		t.Fatalf(`initial render Text("#title") = %q, want "Untitled"`, got)
+	}
+	token := page.CSRFToken()
+	if token == "" {
+		t.Fatal("rendered page exposes no CSRF token")
+	}
+	if want := `name="csrf_token" value="` + token + `"`; !strings.Contains(page.Body, want) {
+		t.Errorf("compiled form did not render the populated CSRF input %q\n--- body ---\n%s", want, page.Body)
+	}
+
+	if got := page.Fire("Rename", liquidtest.Field("title", "Ops")).Text("#title"); got != "Ops" {
+		t.Errorf(`patch Text("#title") = %q, want "Ops"`, got)
 	}
 }
 
