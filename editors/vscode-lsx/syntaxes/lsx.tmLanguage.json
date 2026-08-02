@@ -1,0 +1,10 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Liquid LSX",
+  "scopeName": "text.html.lsx",
+  "patterns": [
+    {
+      "include": "text.html.basic"
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  "name": "liquid-lsx",
+  "displayName": "Liquid .lsx Templates",
+  "description": "Syntax highlighting for Liquid .lsx component templates: HTML plus {{ Field }} interpolation, *goIf/*goFor structural directives, (click)-style event bindings, and [hydroId]-style markers.",
+  "version": "0.1.0",
+  "publisher": "rmoralesthompson",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rmoralesthompson/Liquid"
+  },
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "lsx",
+        "aliases": [
+          "Liquid LSX",
+          "lsx"
+        ],
+        "extensions": [
+          ".lsx"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "lsx",
+        "scopeName": "text.html.lsx",
+        "path": "./syntaxes/lsx.tmLanguage.json"
+      },
+      {
+        "scopeName": "lsx.expression.injection",
+        "path": "./syntaxes/lsx-expression.injection.tmLanguage.json",
+        "injectTo": [
+          "text.html.lsx"
+        ]
+      },
+      {
+        "scopeName": "lsx.attributes.injection",
+        "path": "./syntaxes/lsx-attributes.injection.tmLanguage.json",
+        "injectTo": [
+          "text.html.lsx"
+        ]
+      }
+    ]
+  }
+}
