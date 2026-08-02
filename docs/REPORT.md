@@ -91,7 +91,7 @@ None of these are fatal — they're the expected quality of chat-generated sketc
 - **[docs/template-syntax.md](template-syntax.md)** — new consolidated `.lsx` directive reference (previously scattered across three files with inconsistencies).
 - **[docs/design-decisions.md](design-decisions.md)** — open questions that need answers before/while implementing; intended as the agenda for the brainstorm.
 - **[CLAUDE.md](../CLAUDE.md)** — rewritten from a raw chat transcript into an actual project-guidelines file.
-- `README.md` — left as-is for now; it's the least-corrupted file and rewriting it makes more sense once the implementation plan settles naming and scope.
+- `README.md` — initially left as-is; later replaced with a minimal, D9-compliant public README (the original is preserved as [source/readme-original.md](source/readme-original.md)).
 
 ## 7. Recommended next steps
 
