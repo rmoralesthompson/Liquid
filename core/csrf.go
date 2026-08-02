@@ -10,12 +10,6 @@ import (
 	"time"
 )
 
-// csrfTTL is how long a minted CSRF token stays valid. It tracks the session
-// idle window (D15/D2); a configurable value is session hardening, tracked on
-// ticket #9. Tokens are regenerated on every full-page render, so the window
-// only matters for a page left open untouched.
-const csrfTTL = time.Hour
-
 // csrfTokenField returns the index of a component type's CSRFToken string
 // field — the field the framework populates with the render's token (D15) —
 // or -1 for a component without one.
@@ -31,11 +25,14 @@ func csrfSignature(secret []byte, sessionID string, expiry int64) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-// mintCSRF issues a CSRF token bound to sessionID, expiring csrfTTL from now,
-// encoded sessionID:expiryUnix:signature (D15). Session IDs are base64url,
-// so the colons unambiguously delimit the segments.
-func mintCSRF(secret []byte, sessionID string, now time.Time) string {
-	expiry := now.Add(csrfTTL).Unix()
+// mintCSRF issues a CSRF token bound to sessionID, expiring ttl — the
+// session idle window (D15/D2) — from now, encoded
+// sessionID:expiryUnix:signature (D15). Session IDs are base64url, so the
+// colons unambiguously delimit the segments. Tokens are regenerated on every
+// full-page render, so the window only matters for a page left open
+// untouched.
+func mintCSRF(secret []byte, sessionID string, ttl time.Duration, now time.Time) string {
+	expiry := now.Add(ttl).Unix()
 	return sessionID + ":" + strconv.FormatInt(expiry, 10) + ":" + csrfSignature(secret, sessionID, expiry)
 }
 

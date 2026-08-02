@@ -21,10 +21,12 @@ import (
 type App struct {
 	logger     *slog.Logger
 	routes     []*route
-	services   []reflect.Value // Provide'd singletons, in registration order
-	static     http.Handler    // file server mounted at /static/, nil until Static
-	hydro      hydroRegistry   // live interactive instances (D15)
-	csrfSecret []byte          // HMAC key for CSRF tokens, minted per process (D15)
+	services   []reflect.Value  // Provide'd singletons, in registration order
+	static     http.Handler     // file server mounted at /static/, nil until Static
+	hydro      hydroRegistry    // live interactive instances (D15)
+	csrfSecret []byte           // HMAC key for CSRF tokens, minted per process (D15)
+	limits     Limits           // registry and request bounds, defaults applied (D20)
+	now        func() time.Time // the App's clock; replaceable in tests for idle-expiry control
 }
 
 type route struct {
@@ -125,6 +127,13 @@ func WithLogger(l *slog.Logger) Option {
 	return func(a *App) { a.logger = l }
 }
 
+// WithLimits sets the App's session-registry and request bounds (D20).
+// Unset (zero) fields keep their documented defaults; without this option
+// every limit is at its default.
+func WithLimits(l Limits) Option {
+	return func(a *App) { a.limits = l.withDefaults() }
+}
+
 // New creates an App, applying any options.
 func New(opts ...Option) *App {
 	secret := make([]byte, 32)
@@ -136,6 +145,8 @@ func New(opts ...Option) *App {
 	a := &App{
 		logger:     slog.Default(),
 		csrfSecret: secret,
+		limits:     Limits{}.withDefaults(),
+		now:        time.Now,
 	}
 	for _, opt := range opts {
 		opt(a)
@@ -338,7 +349,7 @@ func (a *App) mintRenderTokens(w http.ResponseWriter, r *http.Request, rt *route
 	if err != nil {
 		return "", "", "", err
 	}
-	return sessionID, hydroID, mintCSRF(a.csrfSecret, sessionID, time.Now()), nil
+	return sessionID, hydroID, mintCSRF(a.csrfSecret, sessionID, a.limits.SessionIdleTimeout, a.now()), nil
 }
 
 // matchRoute returns the most specific registered route matching the path
@@ -422,7 +433,7 @@ func (a *App) renderRoute(w http.ResponseWriter, r *http.Request, rt *route, par
 		return
 	}
 	if rt.hydroField >= 0 {
-		a.hydro.put(sessionID, hydroID, &hydroState{inst: inst, rt: rt})
+		a.hydro.put(sessionID, hydroID, &hydroState{inst: inst, rt: rt}, a.now(), a.limits)
 	}
 
 	head := rt.fallbackHead

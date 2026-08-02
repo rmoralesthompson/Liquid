@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	liquid "github.com/rmoralesthompson/liquid/core"
 )
@@ -147,12 +148,18 @@ func renderInteractive(t *testing.T, srv *httptest.Server, path string) liveSess
 	return liveSession{id: ck.Value, hydro: hydroID(t, body), csrf: csrfToken(t, body)}
 }
 
+// eventPayload is the event body the runtime script would post for an
+// action under this session.
+func eventPayload(sess liveSession, action string) string {
+	return fmt.Sprintf(`{"hydroId":%q,"action":%q,"csrfToken":%q}`, sess.hydro, action, sess.csrf)
+}
+
 // fire POSTs a hydro event as the given session, returning the response
 // status and decoded envelope.
 func fire(t *testing.T, srv *httptest.Server, sess liveSession, action string) (int, envelope) {
 	t.Helper()
 	sessionID := sess.id
-	payload := fmt.Sprintf(`{"hydroId":%q,"action":%q,"csrfToken":%q}`, sess.hydro, action, sess.csrf)
+	payload := eventPayload(sess, action)
 	req, err := http.NewRequest(http.MethodPost, srv.URL+"/hydro-event", strings.NewReader(payload))
 	if err != nil {
 		t.Fatalf("building event request: %v", err)
@@ -327,6 +334,277 @@ func TestGlobalSessionRegistryIsBoundedByEvictingOldestSessions(t *testing.T) {
 
 	if status, _ := fire(t, srv, first, "Increment"); status != http.StatusNotFound {
 		t.Errorf("evicted session: status = %d, want %d", status, http.StatusNotFound)
+	}
+}
+
+func TestGlobalSessionCapIsConfigurable(t *testing.T) {
+	app := liquid.New(liquid.WithLimits(liquid.Limits{MaxSessions: 2}))
+	if err := app.Route("/", &counter{}); err != nil {
+		t.Fatalf("Route: %v", err)
+	}
+	srv := newAppServer(t, app)
+
+	first := renderInteractive(t, srv, "/")
+	second := renderInteractive(t, srv, "/")
+	third := renderInteractive(t, srv, "/")
+
+	if status, _ := fire(t, srv, first, "Increment"); status != http.StatusNotFound {
+		t.Errorf("session past the configured cap: status = %d, want %d", status, http.StatusNotFound)
+	}
+	for _, sess := range []liveSession{second, third} {
+		if status, _ := fire(t, srv, sess, "Increment"); status != http.StatusOK {
+			t.Errorf("session within the configured cap: status = %d, want %d", status, http.StatusOK)
+		}
+	}
+}
+
+// renderInSession GETs path as an existing session and returns the render's
+// established tokens under that same session.
+func renderInSession(t *testing.T, srv *httptest.Server, path, sessionID string) liveSession {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, srv.URL+path, nil)
+	if err != nil {
+		t.Fatalf("building request: %v", err)
+	}
+	req.AddCookie(&http.Cookie{Name: "liquid_session", Value: sessionID})
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET %s: %v", path, err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if err != nil {
+		t.Fatalf("reading body: %v", err)
+	}
+	return liveSession{id: sessionID, hydro: hydroID(t, string(body)), csrf: csrfToken(t, string(body))}
+}
+
+// Pin (green on write): both caps flow through Limits since the configurable
+// global cap landed; this fixes the per-session half in place.
+func TestPerSessionComponentCapIsConfigurable(t *testing.T) {
+	app := liquid.New(liquid.WithLimits(liquid.Limits{MaxComponentsPerSession: 2}))
+	if err := app.Route("/", &counter{}); err != nil {
+		t.Fatalf("Route: %v", err)
+	}
+	srv := newAppServer(t, app)
+
+	first := renderInteractive(t, srv, "/")
+	second := renderInSession(t, srv, "/", first.id)
+	third := renderInSession(t, srv, "/", first.id)
+
+	if status, _ := fire(t, srv, first, "Increment"); status != http.StatusNotFound {
+		t.Errorf("entry past the configured cap: status = %d, want %d", status, http.StatusNotFound)
+	}
+	for _, sess := range []liveSession{second, third} {
+		if status, _ := fire(t, srv, sess, "Increment"); status != http.StatusOK {
+			t.Errorf("entry within the configured cap: status = %d, want %d", status, http.StatusOK)
+		}
+	}
+}
+
+func TestSessionEvictionIsLRUNotFIFO(t *testing.T) {
+	app := liquid.New(liquid.WithLimits(liquid.Limits{MaxSessions: 2}))
+	if err := app.Route("/", &counter{}); err != nil {
+		t.Fatalf("Route: %v", err)
+	}
+	srv := newAppServer(t, app)
+
+	oldest := renderInteractive(t, srv, "/")
+	middle := renderInteractive(t, srv, "/")
+
+	// Dispatching against the oldest session makes it the most recently
+	// used; the next session past the cap must evict the untouched one.
+	if status, _ := fire(t, srv, oldest, "Increment"); status != http.StatusOK {
+		t.Fatalf("touching oldest session: status = %d, want %d", status, http.StatusOK)
+	}
+	newest := renderInteractive(t, srv, "/")
+
+	if status, _ := fire(t, srv, middle, "Increment"); status != http.StatusNotFound {
+		t.Errorf("least recently used session: status = %d, want %d (eviction must be LRU, D20)", status, http.StatusNotFound)
+	}
+	for name, sess := range map[string]liveSession{"touched": oldest, "newest": newest} {
+		if status, _ := fire(t, srv, sess, "Increment"); status != http.StatusOK {
+			t.Errorf("%s session: status = %d, want %d", name, status, http.StatusOK)
+		}
+	}
+}
+
+func TestComponentEvictionWithinASessionIsLRUNotFIFO(t *testing.T) {
+	app := liquid.New(liquid.WithLimits(liquid.Limits{MaxComponentsPerSession: 2}))
+	if err := app.Route("/", &counter{}); err != nil {
+		t.Fatalf("Route: %v", err)
+	}
+	srv := newAppServer(t, app)
+
+	oldest := renderInteractive(t, srv, "/")
+	middle := renderInSession(t, srv, "/", oldest.id)
+
+	// Dispatching against the oldest entry makes it the most recently used;
+	// the next render past the cap must evict the untouched one.
+	if status, _ := fire(t, srv, oldest, "Increment"); status != http.StatusOK {
+		t.Fatalf("touching oldest entry: status = %d, want %d", status, http.StatusOK)
+	}
+	newest := renderInSession(t, srv, "/", oldest.id)
+
+	if status, _ := fire(t, srv, middle, "Increment"); status != http.StatusNotFound {
+		t.Errorf("least recently used entry: status = %d, want %d (eviction must be LRU, D20)", status, http.StatusNotFound)
+	}
+	for name, sess := range map[string]liveSession{"touched": oldest, "newest": newest} {
+		if status, _ := fire(t, srv, sess, "Increment"); status != http.StatusOK {
+			t.Errorf("%s entry: status = %d, want %d", name, status, http.StatusOK)
+		}
+	}
+}
+
+// fireRaw POSTs raw bytes to /hydro-event as the given session and returns
+// the status code.
+func fireRaw(t *testing.T, srv *httptest.Server, sessionID, body string) int {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/hydro-event", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("building event request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: "liquid_session", Value: sessionID})
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /hydro-event: %v", err)
+	}
+	_ = resp.Body.Close()
+	return resp.StatusCode
+}
+
+// oversizedEvent builds an event that would dispatch fine were it not padded
+// past limit bytes — so only the body bound can explain a rejection.
+func oversizedEvent(sess liveSession, limit int) string {
+	return fmt.Sprintf(`{"hydroId":%q,"action":"Increment","csrfToken":%q,"payload":{"pad":%q}}`,
+		sess.hydro, sess.csrf, strings.Repeat("x", limit))
+}
+
+func TestOversizedEventBodyIsRejectedBeforeDispatch(t *testing.T) {
+	srv := newServer(t, "/", &counter{})
+	sess := renderInteractive(t, srv, "/")
+
+	status := fireRaw(t, srv, sess.id, oversizedEvent(sess, liquid.DefaultMaxEventBytes))
+
+	if status != http.StatusRequestEntityTooLarge {
+		t.Errorf("status = %d, want %d: /hydro-event must bound the request body (D20)", status, http.StatusRequestEntityTooLarge)
+	}
+	// The live instance must be untouched by the refused event.
+	if _, env := fire(t, srv, sess, "Increment"); !strings.Contains(env.Patch, `<span id="count">1</span>`) {
+		t.Errorf("patch = %q, want count 1: the oversized event must not have dispatched", env.Patch)
+	}
+}
+
+// blocker exposes one action that parks inside the handler and one that
+// returns immediately, to observe whether two same-session dispatches can be
+// inside handlers at once. The channels and scratch cell are package state
+// because handlers hang off the component type; only one test uses them.
+var (
+	blockerEntered = make(chan struct{}, 1)
+	blockerRelease = make(chan struct{})
+	// blockerScratch is written unsynchronized by both handlers: if dispatch
+	// ever lets them overlap, -race reports it even where timing hides it.
+	blockerScratch int
+)
+
+type blocker struct{ HydroID string }
+
+func (b *blocker) Selector() string { return "app-blocker" }
+
+func (b *blocker) Template() string {
+	return `<div data-hydro-id="{{ .HydroID }}">blocker</div>`
+}
+
+// Block parks until the test releases it, holding its dispatch slot.
+func (b *blocker) Block() {
+	blockerScratch++
+	blockerEntered <- struct{}{}
+	<-blockerRelease
+}
+
+// Poke returns immediately.
+func (b *blocker) Poke() { blockerScratch++ }
+
+// Actions mirrors the compiler-generated allowlist (D10).
+func (b *blocker) Actions() []string { return []string{"Block", "Poke"} }
+
+// fireAsync POSTs a hydro event from a goroutine — no t.Fatal off the test
+// goroutine — closing done when the response lands.
+func fireAsync(t *testing.T, srv *httptest.Server, sess liveSession, action string) (done chan struct{}) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/hydro-event", strings.NewReader(eventPayload(sess, action)))
+	if err != nil {
+		t.Fatalf("building event request: %v", err)
+	}
+	req.AddCookie(&http.Cookie{Name: "liquid_session", Value: sess.id})
+	done = make(chan struct{})
+	go func() {
+		defer close(done)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return
+		}
+		_ = resp.Body.Close()
+	}()
+	return done
+}
+
+func TestSameSessionEventsSerializeAcrossComponentInstances(t *testing.T) {
+	// Fresh channels per run: the release close below is one-shot, and a
+	// reused package-level channel would poison -count=2 reruns.
+	blockerEntered = make(chan struct{}, 1)
+	blockerRelease = make(chan struct{})
+
+	srv := newServer(t, "/", &blocker{})
+	first := renderInteractive(t, srv, "/")
+	second := renderInSession(t, srv, "/", first.id)
+
+	blockDone := fireAsync(t, srv, first, "Block")
+	<-blockerEntered
+
+	// While the first instance's handler is parked, an event for a second
+	// instance in the same session must wait its turn (D20.1).
+	pokeDone := fireAsync(t, srv, second, "Poke")
+	select {
+	case <-pokeDone:
+		t.Error("second component's handler ran while the first held the session; same-session dispatch must serialize (D20)")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(blockerRelease)
+	for _, done := range []chan struct{}{blockDone, pokeDone} {
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("dispatch did not complete after release; possible deadlock")
+		}
+	}
+}
+
+// Pin (green on write): same-instance dispatch was already serialized; the
+// session-level mutex keeps it that way. Fifty racing increments on one live
+// instance must all land — interleaved handlers would lose updates, and
+// -race would flag the unsynchronized Count writes.
+func TestConcurrentEventsOnOneInstanceAllLand(t *testing.T) {
+	srv := newServer(t, "/", &counter{})
+	sess := renderInteractive(t, srv, "/")
+
+	const events = 50
+	var dones []chan struct{}
+	for range events {
+		dones = append(dones, fireAsync(t, srv, sess, "Increment"))
+	}
+	for _, done := range dones {
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("concurrent dispatch did not complete")
+		}
+	}
+
+	if _, env := fire(t, srv, sess, "Increment"); !strings.Contains(env.Patch, fmt.Sprintf(`<span id="count">%d</span>`, events+1)) {
+		t.Errorf("patch = %q, want count %d: every serialized event must land", env.Patch, events+1)
 	}
 }
 
