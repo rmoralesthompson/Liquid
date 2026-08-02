@@ -26,15 +26,15 @@ jobs:
 
       - name: Run golangci-lint
         if: hashFiles('go.mod') != ''
-        uses: golangci-lint/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v6
         with:
           version: latest
-          # Uses the .golangci-lint.yml file in your project root
-          args: --timeout=5m
+          # golangci-lint auto-detects .golangci.yml, not this repo's filename
+          args: --timeout=5m --config=.golangci-lint.yml
 
       - name: Skip (no go.mod yet)
         if: hashFiles('go.mod') == ''
-        run: echo "No go.mod yet — module path is still an open decision (docs/design-decisions.md §5). Skipping lint until implementation begins."
+        run: echo "No go.mod yet — implementation has not started (see docs/HANDOFF.md). Skipping lint."
 
   test:
     name: Run Unit Tests
@@ -56,4 +56,4 @@ jobs:
 
       - name: Skip (no go.mod yet)
         if: hashFiles('go.mod') == ''
-        run: echo "No go.mod yet — module path is still an open decision (docs/design-decisions.md §5). Skipping tests until implementation begins."
+        run: echo "No go.mod yet — implementation has not started (see docs/HANDOFF.md). Skipping tests."
