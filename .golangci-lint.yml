@@ -36,8 +36,7 @@ linters-settings:
 
   revive:
     rules:
-      - name: exported
-        arguments: [sayArguments] # Requires comments on public items
+      - name: exported # Requires comments on public items
       - name: argument-limit
         arguments: [5] # Prevents massive function signatures
 

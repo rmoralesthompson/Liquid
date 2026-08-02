@@ -28,22 +28,27 @@ func (c *compiledHello) Selector() string { return "app-hello" }
 
 func (c *compiledHello) Template() string { return c.text }
 
-func TestBuildThenServeRendersTheFixtureEndToEnd(t *testing.T) {
-	dir := t.TempDir()
-	src := filepath.Join("internal", "compiler", "testdata", "hello")
+// copyFixtureDir copies every file in src into dst.
+func copyFixtureDir(t *testing.T, src, dst string) {
+	t.Helper()
 	entries, err := os.ReadDir(src)
 	if err != nil {
 		t.Fatalf("reading fixture: %v", err)
 	}
 	for _, e := range entries {
-		data, err := os.ReadFile(filepath.Join(src, e.Name()))
-		if err != nil {
-			t.Fatalf("reading fixture file %s: %v", e.Name(), err)
+		data, readErr := os.ReadFile(filepath.Join(src, e.Name()))
+		if readErr != nil {
+			t.Fatalf("reading fixture file %s: %v", e.Name(), readErr)
 		}
-		if err := os.WriteFile(filepath.Join(dir, e.Name()), data, 0o644); err != nil {
-			t.Fatalf("copying fixture file %s: %v", e.Name(), err)
+		if writeErr := os.WriteFile(filepath.Join(dst, e.Name()), data, 0o644); writeErr != nil {
+			t.Fatalf("copying fixture file %s: %v", e.Name(), writeErr)
 		}
 	}
+}
+
+func TestBuildThenServeRendersTheFixtureEndToEnd(t *testing.T) {
+	dir := t.TempDir()
+	copyFixtureDir(t, filepath.Join("internal", "compiler", "testdata", "hello"), dir)
 
 	if err := run([]string{"build", dir}); err != nil {
 		t.Fatalf("liquid build: %v", err)
@@ -61,7 +66,7 @@ func TestBuildThenServeRendersTheFixtureEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("reading body: %v", err)
