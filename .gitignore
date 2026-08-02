@@ -23,6 +23,7 @@ go.work.sum
 
 # Local-only Claude settings (personal permissions; not shared config)
 .claude/settings.local.json
+.claude/worktrees/
 
 # Editor / OS noise
 .DS_Store

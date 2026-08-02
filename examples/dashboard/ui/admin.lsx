@@ -1,0 +1,5 @@
+<main class="admin">
+  <h1>Admin area</h1>
+  <p>You presented the right key, so the guard let you through.</p>
+  <p><a href="/">Back to the dashboard</a></p>
+</main>

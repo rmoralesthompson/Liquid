@@ -75,11 +75,16 @@ func (p *Page) Text(selector string) string {
 	return textOf(p.h.t, p.doc, selector)
 }
 
-// HydroID returns the page's data-hydro-id token, or "" for a
+// HydroID returns the page's first data-hydro-id token, or "" for a
 // non-interactive page.
 func (p *Page) HydroID() string {
+	return firstHydroID(p.doc)
+}
+
+// firstHydroID returns the first data-hydro-id on or under n, or "".
+func firstHydroID(n *html.Node) string {
 	var id string
-	walk(p.doc, func(n *html.Node) bool {
+	walk(n, func(n *html.Node) bool {
 		if v, ok := attr(n, "data-hydro-id"); ok {
 			id = v
 			return false
@@ -104,12 +109,43 @@ func (p *Page) CSRFToken() string {
 	return token
 }
 
+// hydroIDFor resolves the hydro token Fire should target: the first
+// data-hydro-id on or under the element matching selector, or the
+// document's first for an empty selector.
+func (p *Page) hydroIDFor(selector string) string {
+	if selector == "" {
+		return p.HydroID()
+	}
+	p.h.t.Helper()
+	var root *html.Node
+	walk(p.doc, func(n *html.Node) bool {
+		if matches(n, selector) {
+			root = n
+			return false
+		}
+		return true
+	})
+	if root == nil {
+		p.h.t.Fatalf("liquidtest: Fire: no element matches selector %q", selector)
+	}
+	return firstHydroID(root)
+}
+
 // FireOption adjusts one Fire call away from the faithful-browser default.
 type FireOption func(*fireConfig)
 
 type fireConfig struct {
 	csrf   *string
 	fields map[string]string
+	from   string
+}
+
+// From targets the event at the component whose rendered root matches
+// selector (the element carrying data-hydro-id, or an ancestor of it) —
+// needed on pages hosting several interactive components, where the default
+// is the document's first hydro id.
+func From(selector string) FireOption {
+	return func(c *fireConfig) { c.from = selector }
 }
 
 // CSRF overrides the token Fire sends — standing in for a forged or stolen
@@ -136,13 +172,16 @@ func Field(name, value string) FireOption {
 // envelope, so refusals are assertable; an undecodable 200 fails the test.
 func (p *Page) Fire(action string, opts ...FireOption) *Patch {
 	p.h.t.Helper()
-	hydroID := p.HydroID()
-	if hydroID == "" {
-		p.h.t.Fatal("liquidtest: Fire on a page with no data-hydro-id; is the component interactive?")
-	}
 	cfg := fireConfig{}
 	for _, opt := range opts {
 		opt(&cfg)
+	}
+	hydroID := p.hydroIDFor(cfg.from)
+	if hydroID == "" {
+		if cfg.from != "" {
+			p.h.t.Fatalf("liquidtest: Fire: no data-hydro-id on or under %q; is that component interactive?", cfg.from)
+		}
+		p.h.t.Fatal("liquidtest: Fire on a page with no data-hydro-id; is the component interactive?")
 	}
 	csrf := p.CSRFToken()
 	if cfg.csrf != nil {

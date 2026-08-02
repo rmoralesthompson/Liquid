@@ -1,0 +1,6 @@
+<section [hydroId] id="stat-card" class="card">
+  <h2>{{ Label }}</h2>
+  <p id="stat-value">{{ Value }}</p>
+  <p id="pin-state" *goIf="Pinned">Pinned to the top of your reports.</p>
+  <button id="pin" (click)="TogglePin">Toggle pin</button>
+</section>
