@@ -14,6 +14,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"golang.org/x/net/html"
@@ -132,7 +133,7 @@ func compileFile(ctx context.Context, lsxPath string) ([]Diagnostic, error) {
 		return nil, fmt.Errorf("resolving paired source %s: %w", base+".go", err)
 	}
 
-	compiled, err := compileLSX(src)
+	compiled, actions, err := compileLSX(src)
 	if err != nil {
 		return nil, err
 	}
@@ -146,6 +147,15 @@ func (c *%s) Template() string {
 	return %q
 }
 `, pkg, structName, structName, compiled)
+	if len(actions) > 0 {
+		generated += fmt.Sprintf(`
+// Actions returns the action allowlist compiled from %s's event
+// bindings (D10); the server dispatches only these.
+func (c *%s) Actions() []string {
+	return []string{%s}
+}
+`, structName, structName, quoteAll(actions))
+	}
 
 	formatted, err := format.Source([]byte(generated))
 	if err != nil {
@@ -160,12 +170,13 @@ func (c *%s) Template() string {
 }
 
 // compileLSX parses .lsx markup into an HTML node tree, applies the template
-// transforms, and renders the result as html/template text.
-func compileLSX(src []byte) (string, error) {
+// transforms, and renders the result as html/template text plus the action
+// allowlist collected from event bindings (D10).
+func compileLSX(src []byte) (string, []string, error) {
 	ctx := &html.Node{Type: html.ElementNode, Data: "body", DataAtom: atom.Body}
 	nodes, err := html.ParseFragment(strings.NewReader(string(src)), ctx)
 	if err != nil {
-		return "", fmt.Errorf("parsing .lsx markup: %w", err)
+		return "", nil, fmt.Errorf("parsing .lsx markup: %w", err)
 	}
 
 	// Reparent the fragment nodes under a container so structural directives
@@ -178,21 +189,23 @@ func compileLSX(src []byte) (string, error) {
 		}
 		container.AppendChild(n)
 	}
-	if err := transform(container); err != nil {
-		return "", err
+	var actions []string
+	if err := transform(container, &actions); err != nil {
+		return "", nil, err
 	}
 
 	var b strings.Builder
 	for n := container.FirstChild; n != nil; n = n.NextSibling {
 		if err := html.Render(&b, n); err != nil {
-			return "", fmt.Errorf("rendering compiled template: %w", err)
+			return "", nil, fmt.Errorf("rendering compiled template: %w", err)
 		}
 	}
-	return strings.TrimRight(b.String(), "\n"), nil
+	return strings.TrimRight(b.String(), "\n"), actions, nil
 }
 
-// transform rewrites Liquid template sugar on a parsed node and its children.
-func transform(n *html.Node) error {
+// transform rewrites Liquid template sugar on a parsed node and its children,
+// appending any bound action names to actions.
+func transform(n *html.Node, actions *[]string) error {
 	if n.Type == html.TextNode {
 		n.Data = rewriteInterpolations(n.Data)
 	}
@@ -200,42 +213,67 @@ func transform(n *html.Node) error {
 		if err := applyStructuralDirective(n); err != nil {
 			return err
 		}
+		if err := applyBindings(n, actions); err != nil {
+			return err
+		}
 	}
 	for i := range n.Attr {
 		n.Attr[i].Val = rewriteInterpolations(n.Attr[i].Val)
 	}
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		if err := transform(c); err != nil {
+		if err := transform(c, actions); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
+// applyBindings rewrites non-structural binding sugar on one element —
+// (click), [hydroId] — via each kind's rewrite, collecting bound action
+// names. Binding rewrites mutate attributes in place, so the loop stays
+// valid.
+func applyBindings(n *html.Node, actions *[]string) error {
+	for i, a := range n.Attr {
+		k := kindByLowered(a.Key)
+		if k == nil || k.structural {
+			continue
+		}
+		if err := k.rewrite(n, i, actions); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// quoteAll renders names as a comma-separated list of quoted Go string
+// literals, deduplicated and sorted so regeneration is deterministic.
+func quoteAll(names []string) string {
+	quoted := make([]string, 0, len(names))
+	for _, n := range slices.Sorted(slices.Values(names)) {
+		q := fmt.Sprintf("%q", n)
+		if len(quoted) > 0 && quoted[len(quoted)-1] == q {
+			continue
+		}
+		quoted = append(quoted, q)
+	}
+	return strings.Join(quoted, ", ")
+}
+
 // applyStructuralDirective wraps an element carrying a structural directive
 // attribute in the html/template control block it compiles to (D1). The
-// parser has already lowercased attribute keys, so directives are matched in
-// that form. Inserted control nodes are RawNodes: they render verbatim and
-// are never re-visited as interpolation text.
+// parser has already lowercased attribute keys, so kinds are matched by
+// their lowered spelling. Inserted control nodes are RawNodes: they render
+// verbatim and are never re-visited as interpolation text.
 func applyStructuralDirective(n *html.Node) error {
 	for i, a := range n.Attr {
-		switch a.Key {
-		case "*goif":
-			n.Attr = append(n.Attr[:i], n.Attr[i+1:]...)
-			wrap(n, "{{if "+fieldRef(a.Val)+"}}", "{{end}}")
-			return nil
-		case "*gofor":
-			loopVar, list, ok := parseGoFor(a.Val)
-			if !ok {
-				// Diagnostics gate codegen, so a malformed expression here
-				// means the raw-source scan missed this attribute — fail
-				// loudly rather than ship the directive to the browser.
-				return fmt.Errorf("malformed *goFor expression %q escaped the diagnostic scan", a.Val)
-			}
-			n.Attr = append(n.Attr[:i], n.Attr[i+1:]...)
-			wrap(n, "{{range $"+loopVar+" := "+fieldRef(list)+"}}", "{{end}}")
-			return nil
+		k := kindByLowered(a.Key)
+		if k == nil || !k.structural {
+			continue
 		}
+		// Rewrite removes the attribute, invalidating the loop's view of
+		// n.Attr — return immediately; diagnostics guarantee at most one
+		// structural directive per element (LSX006).
+		return k.rewrite(n, i, nil)
 	}
 	return nil
 }

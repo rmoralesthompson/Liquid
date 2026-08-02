@@ -3,18 +3,23 @@ package compiler
 import (
 	"bytes"
 	"fmt"
+	"path/filepath"
 	"strings"
 )
 
-// directive is one structural directive attribute found in raw .lsx source,
+// directive is one directive or binding attribute found in raw .lsx source,
 // positioned at the first byte of its expression (1-based line, 1-based byte
-// column) so a diagnostic points at what the author should edit.
+// column) so a diagnostic points at what the author should edit. nameLine and
+// nameCol point at the attribute name itself, for diagnostics about the
+// attribute rather than its expression.
 type directive struct {
-	name string // canonical spelling: *goIf or *goFor
-	expr string
-	line int
-	col  int
-	tag  int // ordinal of the enclosing < tag, for the one-per-element rule
+	name     string // canonical spelling: *goIf, *goFor, (click), [hydroId]
+	expr     string
+	line     int
+	col      int
+	nameLine int
+	nameCol  int
+	tag      int // ordinal of the enclosing < tag, for the one-per-element rule
 }
 
 // cursor walks a byte slice tracking the 1-based line and byte column of the
@@ -123,32 +128,42 @@ func scanDirectives(src []byte) []directive {
 			q := c.peek()
 			c.advance(1)
 			c.skipPast(string(q))
-		case c.foldPrefix("*goif") && c.boundaryAt(len("*goif")):
-			d, ok := c.scanDirectiveValue("*goIf", tag)
-			if !ok {
-				return dirs
-			}
-			dirs = append(dirs, d)
-		case c.foldPrefix("*gofor") && c.boundaryAt(len("*gofor")):
-			d, ok := c.scanDirectiveValue("*goFor", tag)
-			if !ok {
-				return dirs
-			}
-			dirs = append(dirs, d)
 		default:
-			c.advance(1)
+			k := c.matchKind()
+			if k == nil {
+				c.advance(1)
+				continue
+			}
+			d, ok := c.scanDirectiveValue(k.canonical, tag)
+			if !ok {
+				return dirs
+			}
+			dirs = append(dirs, d)
 		}
 	}
 	return dirs
+}
+
+// matchKind reports which directive kind, if any, starts an attribute at the
+// cursor.
+func (c *cursor) matchKind() *directiveKind {
+	for i := range directiveKinds {
+		k := &directiveKinds[i]
+		if c.foldPrefix(k.lowered) && c.boundaryAt(len(k.lowered)) {
+			return k
+		}
+	}
+	return nil
 }
 
 // scanDirectiveValue consumes one directive attribute starting at its name,
 // returning the directive positioned at its expression. ok is false when a
 // quoted value has no closing quote, which ends the caller's scan.
 func (c *cursor) scanDirectiveValue(name string, tag int) (directive, bool) {
+	nameLine, nameCol := c.line, c.col
 	c.advance(len(name))
 	c.skipSpace()
-	d := directive{name: name, tag: tag, line: c.line, col: c.col}
+	d := directive{name: name, tag: tag, line: c.line, col: c.col, nameLine: nameLine, nameCol: nameCol}
 	if c.done() || c.peek() != '=' {
 		return d, true // valueless attribute: empty expression
 	}
@@ -186,43 +201,25 @@ func isUnquotedValueEnd(b byte) bool {
 	return false
 }
 
-// checkDirectives validates directive expressions against their grammar,
-// returning one diagnostic per malformed expression.
+// checkDirectives validates directive expressions against their kinds'
+// grammar, returning one diagnostic per malformed expression, plus the
+// file-level patch-boundary and one-structural-per-element rules.
 func checkDirectives(file string, dirs []directive) []Diagnostic {
 	var diags []Diagnostic
 	for _, d := range dirs {
-		var message, suggestion string
-		switch d.name {
-		case "*goIf":
-			if isFieldPath(d.expr) {
-				continue
-			}
-			message = fmt.Sprintf("malformed *goIf expression %q: want a field path such as %q", d.expr, "IsActive")
-			suggestion = "bind *goIf to a boolean field or method on the component struct"
-		case "*goFor":
-			if loopVar, list, ok := parseGoFor(d.expr); ok && isSimpleIdent(loopVar) && isFieldPath(list) {
-				continue
-			}
-			message = fmt.Sprintf("malformed *goFor expression %q: want %q", d.expr, "let <var> of <FieldPath>")
-			suggestion = `use the form *goFor="let item of Items"`
-			if isSimpleIdent(d.expr) {
-				suggestion = fmt.Sprintf(`write *goFor="let item of %s"`, d.expr)
-			}
-		default:
+		k := kindByCanonical(d.name)
+		if k == nil || k.check == nil {
 			continue
 		}
-		diags = append(diags, Diagnostic{
-			File:       file,
-			Line:       d.line,
-			Col:        d.col,
-			Severity:   SeverityError,
-			Code:       CodeMalformedDirective,
-			Message:    message,
-			Suggestion: suggestion,
-		})
+		if diag := k.check(file, d); diag != nil {
+			diags = append(diags, *diag)
+		}
+	}
+	if d := checkHydroRoot(file, dirs); d != nil {
+		diags = append(diags, *d)
 	}
 	for i := 1; i < len(dirs); i++ {
-		if dirs[i].tag != dirs[i-1].tag {
+		if dirs[i].tag != dirs[i-1].tag || !isStructural(dirs[i].name) || !isStructural(dirs[i-1].name) {
 			continue
 		}
 		diags = append(diags, Diagnostic{
@@ -239,6 +236,44 @@ func checkDirectives(file string, dirs []directive) []Diagnostic {
 	return diags
 }
 
+// checkHydroRoot enforces the patch-boundary rule: an event binding needs
+// some element in the file to declare [hydroId], or there is nothing for the
+// runtime to swap when the event's patch comes back (D14). The diagnostic
+// anchors at the first event binding, reported once per file.
+func checkHydroRoot(file string, dirs []directive) *Diagnostic {
+	var firstBinding *directive
+	for i, d := range dirs {
+		if d.name == "[hydroId]" {
+			return nil
+		}
+		if d.name == "(click)" && firstBinding == nil {
+			firstBinding = &dirs[i]
+		}
+	}
+	if firstBinding == nil {
+		return nil
+	}
+	return &Diagnostic{
+		File:     file,
+		Line:     firstBinding.nameLine,
+		Col:      firstBinding.nameCol,
+		Severity: SeverityError,
+		Code:     CodeMissingHydroRoot,
+		Message: fmt.Sprintf("(click) needs a patch boundary, but no element in %s declares [hydroId]",
+			filepath.Base(file)),
+		Suggestion: "add [hydroId] to the component's root element",
+	}
+}
+
+// isStructural reports whether name is a structural directive — one that
+// wraps its element in a control block and so cannot share an element with
+// another structural directive. Event bindings such as (click) are not
+// structural and coexist freely.
+func isStructural(name string) bool {
+	k := kindByCanonical(name)
+	return k != nil && k.structural
+}
+
 // isFieldPath reports whether s is a bare dot-path of Go identifiers
 // (Field, Form.Value) or a loop-variable reference ($item, $item.Name).
 func isFieldPath(s string) bool {
@@ -252,25 +287,19 @@ func isFieldPath(s string) bool {
 }
 
 // directiveRefs extracts the struct references directive expressions make —
-// a *goIf condition, a *goFor list — as positioned expressions for the vet
-// cross-check. Loop-variable references ($var) resolve at render time, not
-// against the struct, so they are skipped.
+// a *goIf condition, a *goFor list, a (click) handler, a [hydroId]
+// declaration — as positioned expressions for the vet cross-check, each
+// kind's ref extractor deciding what there is to check.
 func directiveRefs(dirs []directive) []interpolation {
 	var refs []interpolation
 	for _, d := range dirs {
-		expr, line, col := d.expr, d.line, d.col
-		if d.name == "*goFor" {
-			_, list, ok := parseGoFor(d.expr)
-			if !ok {
-				continue
-			}
-			line, col = advancePos(line, col, d.expr[:strings.LastIndex(d.expr, list)])
-			expr = list
-		}
-		if strings.HasPrefix(expr, "$") {
+		k := kindByCanonical(d.name)
+		if k == nil || k.ref == nil {
 			continue
 		}
-		refs = append(refs, interpolation{expr: expr, line: line, col: col})
+		if ref, ok := k.ref(d); ok {
+			refs = append(refs, ref)
+		}
 	}
 	return refs
 }

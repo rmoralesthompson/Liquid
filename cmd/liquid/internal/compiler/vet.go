@@ -62,11 +62,22 @@ func vetReferences(ctx context.Context, dir, lsxPath, structName string, interps
 
 	var diags []Diagnostic
 	for _, in := range interps {
+		if in.kind == refHydroRoot {
+			if d := checkHydroField(lsxPath, structName, in, pairedType, pkg.Types); d != nil {
+				diags = append(diags, *d)
+			}
+			continue
+		}
 		name := strings.TrimPrefix(in.expr, ".")
 		if !isSimpleIdent(name) {
 			continue
 		}
 		if member, _, _ := types.LookupFieldOrMethod(pairedType, true, pkg.Types, name); member != nil {
+			if in.kind == refAction {
+				if d := checkHandler(lsxPath, structName, in, member); d != nil {
+					diags = append(diags, *d)
+				}
+			}
 			continue
 		}
 		var suggestion string
@@ -84,6 +95,57 @@ func vetReferences(ctx context.Context, dir, lsxPath, structName string, interps
 		})
 	}
 	return diags, nil
+}
+
+// checkHydroField verifies that a component declaring [hydroId] carries the
+// HydroID field the framework fills at render: a field (not a method) whose
+// underlying type is string. Anything else is an LSX009, or nil when the
+// plumbing is in place.
+func checkHydroField(lsxPath, structName string, in interpolation, pairedType types.Type, pkg *types.Package) *Diagnostic {
+	member, _, _ := types.LookupFieldOrMethod(pairedType, true, pkg, "HydroID")
+	if v, ok := member.(*types.Var); ok {
+		if basic, ok := v.Type().Underlying().(*types.Basic); ok && basic.Kind() == types.String {
+			return nil
+		}
+	}
+	return &Diagnostic{
+		File:     lsxPath,
+		Line:     in.line,
+		Col:      in.col,
+		Severity: SeverityError,
+		Code:     CodeMissingHydroField,
+		Message: fmt.Sprintf("%s uses [hydroId] but has no HydroID string field for the framework to fill",
+			structName),
+		Suggestion: fmt.Sprintf("add HydroID string to the %s struct", structName),
+	}
+}
+
+// checkHandler verifies that an event-binding target is a dispatchable
+// handler: a method with no parameters and no results (the v0.1 half of D11 —
+// the liquid.Event variant arrives with (submit) payloads). Anything else is
+// an LSX008, or nil when the handler is fine.
+func checkHandler(lsxPath, structName string, in interpolation, member types.Object) *Diagnostic {
+	d := &Diagnostic{
+		File:       lsxPath,
+		Line:       in.line,
+		Col:        in.col,
+		Severity:   SeverityError,
+		Code:       CodeInvalidHandler,
+		Suggestion: fmt.Sprintf("change the method to func (c *%s) %s()", structName, in.expr),
+	}
+	fn, ok := member.(*types.Func)
+	if !ok {
+		d.Message = fmt.Sprintf("(click) handler %s is a field, not a method", in.expr)
+		d.Suggestion = fmt.Sprintf("add a method func (c *%s) %s() and bind that instead", structName, in.expr)
+		return d
+	}
+	sig := fn.Type().(*types.Signature)
+	if sig.Params().Len() == 0 && sig.Results().Len() == 0 {
+		return nil
+	}
+	d.Message = fmt.Sprintf("(click) handler %s has signature %s; a v0.1 click handler takes no arguments and returns nothing",
+		in.expr, fn.Type())
+	return d
 }
 
 // brokenPackageDiags translates go/types errors from the paired package into
