@@ -8,6 +8,16 @@
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/block-dangerous-bash.sh\"",
             "statusMessage": "Checking command safety..."
+          },
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/block-push-main.sh\"",
+            "statusMessage": "Checking push target..."
+          },
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/commit-title.sh\"",
+            "statusMessage": "Checking commit title structure..."
           }
         ]
       }

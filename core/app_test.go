@@ -19,6 +19,9 @@ const helloWorldHTML = "<h1>Hello, world!</h1>"
 // neverRenderedHTML marks templates that a failing lifecycle must not reach.
 const neverRenderedHTML = "<p>never rendered</p>"
 
+// placeholderHTML is for components whose render output is irrelevant.
+const placeholderHTML = "<p>x</p>"
+
 type hello struct {
 	Name string
 }
@@ -33,9 +36,7 @@ func newServer(t *testing.T, path string, c liquid.Component) *httptest.Server {
 	if err := app.Route(path, c); err != nil {
 		t.Fatalf("Route: %v", err)
 	}
-	srv := httptest.NewServer(app)
-	t.Cleanup(srv.Close)
-	return srv
+	return newAppServer(t, app)
 }
 
 func get(t *testing.T, url string) (*http.Response, string) {
@@ -465,7 +466,7 @@ type intParam struct {
 
 func (i *intParam) Selector() string { return "app-int-param" }
 
-func (i *intParam) Template() string { return "<p>x</p>" }
+func (i *intParam) Template() string { return placeholderHTML }
 
 func TestRouteRejectsPathParamTagOnNonStringField(t *testing.T) {
 	app := liquid.New()
