@@ -22,6 +22,13 @@ const (
 	// refCSRFRoot is a <form> element, which requires the struct to carry
 	// the CSRFToken string field the framework fills (D15).
 	refCSRFRoot
+	// refChildTag is a child-selector element, which must name a component
+	// declared in the package (D14).
+	refChildTag
+	// refInput is an [input] binding on a child-selector element: the
+	// expression references the parent struct, and the bound name must be an
+	// assignable field on the child struct.
+	refInput
 )
 
 // pos is a position in raw .lsx source: 1-based line, 1-based byte column,
@@ -41,9 +48,14 @@ type structRef struct {
 	pos
 	kind refKind
 	// binding is the canonical spelling of the event binding a refAction
-	// came from — (click), (submit) — so diagnostics name what the author
-	// typed.
+	// came from — (click), (submit) — or the bound child field name of a
+	// refInput, so diagnostics name what the author typed.
 	binding string
+	// sel is the child selector a refInput binds into.
+	sel string
+	// namePos is a refInput's attribute-name position, where diagnostics
+	// about the bound child field (rather than the expression) anchor.
+	namePos pos
 }
 
 // scanInterpolations walks raw .lsx source for {{ ... }} tokens, recording

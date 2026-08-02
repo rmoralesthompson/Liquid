@@ -213,6 +213,10 @@ func transform(n *html.Node, actions *[]string) error {
 		if err := applyStructuralDirective(n); err != nil {
 			return err
 		}
+		if isChildSelector(n) {
+			rewriteChildSelector(n)
+			return nil
+		}
 		if err := applyBindings(n, actions); err != nil {
 			return err
 		}
@@ -246,6 +250,50 @@ func applyBindings(n *html.Node, actions *[]string) error {
 		}
 	}
 	return nil
+}
+
+// isChildSelector reports whether an element is a nested component
+// occurrence: a custom-element tag (hyphenated, unknown to HTML itself)
+// that the renderer resolves from the component registry (D14).
+func isChildSelector(n *html.Node) bool {
+	return n.DataAtom == 0 && strings.Contains(n.Data, "-")
+}
+
+// rewriteChildSelector replaces a child-selector element with the liquidChild
+// template call the runtime renders it through: the selector plus one
+// (field, value) pair per [input] binding, in attribute order. The element's
+// other attributes and its content have no meaning in v0.1 and are dropped.
+func rewriteChildSelector(n *html.Node) {
+	var call strings.Builder
+	fmt.Fprintf(&call, "{{liquidChild %q", n.Data)
+	for _, a := range n.Attr {
+		name, ok := inputBindingName(a.Key)
+		if !ok {
+			continue
+		}
+		fmt.Fprintf(&call, " %q %s", name, fieldRef(a.Val))
+	}
+	call.WriteString("}}")
+
+	n.Type = html.RawNode
+	n.Data = call.String()
+	n.Attr = nil
+	for n.FirstChild != nil {
+		n.RemoveChild(n.FirstChild)
+	}
+}
+
+// inputBindingName extracts the child field name from an [input] binding
+// attribute key ("[userid]" → "userid"). Bracketed framework bindings such as
+// [hydroId] are not inputs.
+func inputBindingName(key string) (string, bool) {
+	if len(key) < 3 || key[0] != '[' || key[len(key)-1] != ']' {
+		return "", false
+	}
+	if kindByLowered(key) != nil {
+		return "", false
+	}
+	return key[1 : len(key)-1], true
 }
 
 // injectCSRFInput appends the hidden CSRF token input every <form> carries

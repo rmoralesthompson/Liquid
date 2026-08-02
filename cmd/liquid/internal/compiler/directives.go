@@ -12,12 +12,22 @@ import (
 // what the author should edit. namePos points at the attribute name itself,
 // for diagnostics about the attribute rather than its expression.
 type directive struct {
-	name string // canonical spelling: *goIf, *goFor, (click), [hydroId]
+	name string // canonical spelling: *goIf, *goFor, (click), [hydroId], <child>, [input]
 	expr string
 	pos
 	namePos pos
-	tag     int // ordinal of the enclosing < tag, for the one-per-element rule
+	tag     int    // ordinal of the enclosing < tag, for the one-per-element rule
+	attr    string // an [input] binding's child field name, as the author typed it
+	sel     string // the child selector: an <child>'s own tag, an [input]'s enclosing tag
 }
+
+// The two directive kinds the tag scanner records without a kinds-table
+// entry: child-selector tags are dynamic (any hyphenated element), and their
+// [input] bindings take arbitrary attribute names.
+const (
+	kindChildTag = "<child>"
+	kindInput    = "[input]"
+)
 
 // cursor walks a byte slice tracking the 1-based line and byte column of the
 // current position, so scans over raw source can report positions matching
@@ -101,7 +111,7 @@ func (c *cursor) boundaryAt(n int) bool {
 func scanDirectives(src []byte) []directive {
 	var dirs []directive
 	c := &cursor{src: src, line: 1, col: 1}
-	tag, inTag := 0, false
+	tag, inTag, childSel := 0, false, ""
 	for !c.done() {
 		if !inTag {
 			if c.hasPrefix("<!--") {
@@ -111,9 +121,16 @@ func scanDirectives(src []byte) []directive {
 			if c.peek() == '<' {
 				inTag = true
 				tag++
-				if c.foldPrefix("<form") && c.boundaryAt(len("<form")) {
-					at := pos{line: c.line, col: c.col}
+				childSel = ""
+				at := pos{line: c.line, col: c.col}
+				switch name := c.tagName(); {
+				case name == "form":
 					dirs = append(dirs, directive{name: "<form>", tag: tag, pos: at, namePos: at})
+				case strings.Contains(name, "-"):
+					// A custom-element tag is a child-component occurrence
+					// (D14); its bracketed attributes scan as [input] bindings.
+					childSel = name
+					dirs = append(dirs, directive{name: kindChildTag, expr: name, sel: name, tag: tag, pos: at, namePos: at})
 				}
 			}
 			c.advance(1)
@@ -130,12 +147,18 @@ func scanDirectives(src []byte) []directive {
 			c.advance(1)
 			c.skipPast(string(q))
 		default:
-			k := c.matchKind()
-			if k == nil {
+			var d directive
+			var ok bool
+			switch k, input := c.matchKind(), c.matchInputAttr(childSel); {
+			case k != nil:
+				d, ok = c.scanDirectiveValue(k.canonical, tag)
+			case input != "":
+				d, ok = c.scanDirectiveValue("["+input+"]", tag)
+				d.name, d.attr, d.sel = kindInput, input, childSel
+			default:
 				c.advance(1)
 				continue
 			}
-			d, ok := c.scanDirectiveValue(k.canonical, tag)
 			if !ok {
 				return dirs
 			}
@@ -143,6 +166,45 @@ func scanDirectives(src []byte) []directive {
 		}
 	}
 	return dirs
+}
+
+// tagName reads the element name at a '<' the cursor sits on, lowercased —
+// HTML tag names are case-insensitive. A closing tag or non-name (comment,
+// doctype, stray <) yields "".
+func (c *cursor) tagName() string {
+	i := c.i + 1
+	start := i
+	for i < len(c.src) && isTagNameByte(c.src[i]) {
+		i++
+	}
+	return strings.ToLower(string(c.src[start:i]))
+}
+
+// isTagNameByte reports whether b may appear in an element name: letters,
+// digits, and the hyphens that mark custom elements.
+func isTagNameByte(b byte) bool {
+	return b == '-' || b >= '0' && b <= '9' || b >= 'A' && b <= 'Z' || b >= 'a' && b <= 'z'
+}
+
+// matchInputAttr reports the field name of an [input] binding attribute
+// starting at the cursor, or "". Only child-selector elements take input
+// bindings — bracketed attributes elsewhere are left alone (the attribute
+// directive extension point) — and the framework's own bracketed bindings
+// ([hydroId]) are matched by matchKind first, never here.
+func (c *cursor) matchInputAttr(childSel string) string {
+	if childSel == "" || c.done() || c.peek() != '[' {
+		return ""
+	}
+	rest := c.src[c.i+1:]
+	end := bytes.IndexByte(rest, ']')
+	if end <= 0 || !c.boundaryAt(end+2) {
+		return ""
+	}
+	name := string(rest[:end])
+	if !isSimpleIdent(name) {
+		return ""
+	}
+	return name
 }
 
 // matchKind reports which directive kind, if any, starts an attribute at the
@@ -211,9 +273,27 @@ func isUnquotedValueEnd(b byte) bool {
 // file-level patch-boundary and one-structural-per-element rules.
 func checkDirectives(file string, dirs []directive) []Diagnostic {
 	var diags []Diagnostic
+	childTags := make(map[int]string) // tag ordinal → child selector
 	for _, d := range dirs {
+		switch d.name {
+		case kindChildTag:
+			childTags[d.tag] = d.sel
+			continue
+		case kindInput:
+			if diag := checkInputExpr(file, d); diag != nil {
+				diags = append(diags, *diag)
+			}
+			continue
+		}
 		k := kindByCanonical(d.name)
-		if k == nil || k.check == nil {
+		if k == nil {
+			continue
+		}
+		if sel, onChild := childTags[d.tag]; onChild && (k.action || d.name == "[hydroId]") {
+			diags = append(diags, childBindingDiag(file, d, sel))
+			continue
+		}
+		if k.check == nil {
 			continue
 		}
 		if diag := k.check(file, d); diag != nil {
@@ -223,6 +303,28 @@ func checkDirectives(file string, dirs []directive) []Diagnostic {
 	if d := checkHydroRoot(file, dirs); d != nil {
 		diags = append(diags, *d)
 	}
+	return append(diags, conflictingDirectiveDiags(file, dirs)...)
+}
+
+// childBindingDiag builds the LSX014 for an event binding or [hydroId] on a
+// child-selector element, which the child's render replaces wholesale.
+func childBindingDiag(file string, d directive, sel string) Diagnostic {
+	return Diagnostic{
+		File:     file,
+		Line:     d.namePos.line,
+		Col:      d.namePos.col,
+		Severity: SeverityError,
+		Code:     CodeChildBindingUnsupported,
+		Message: fmt.Sprintf("%s cannot bind on the child selector %s; the element is replaced by the child's own render",
+			d.name, sel),
+		Suggestion: fmt.Sprintf("move the %s into the %s component's own template", d.name, sel),
+	}
+}
+
+// conflictingDirectiveDiags reports every element carrying more than one
+// structural directive (LSX006).
+func conflictingDirectiveDiags(file string, dirs []directive) []Diagnostic {
+	var diags []Diagnostic
 	for i := 1; i < len(dirs); i++ {
 		if dirs[i].tag != dirs[i-1].tag || !isStructural(dirs[i].name) || !isStructural(dirs[i-1].name) {
 			continue
@@ -239,6 +341,24 @@ func checkDirectives(file string, dirs []directive) []Diagnostic {
 		})
 	}
 	return diags
+}
+
+// checkInputExpr validates an [input] binding's expression: a bare parent
+// field path, like a *goIf condition. Anything else is an LSX013.
+func checkInputExpr(file string, d directive) *Diagnostic {
+	if d.expr != "" && isFieldPath(d.expr) {
+		return nil
+	}
+	return &Diagnostic{
+		File:     file,
+		Line:     d.line,
+		Col:      d.col,
+		Severity: SeverityError,
+		Code:     CodeBadInputBinding,
+		Message:  fmt.Sprintf("malformed [input] expression %q: want a parent field path such as %q", d.expr, "Owner"),
+		Suggestion: fmt.Sprintf("write [%s]=%q — input bindings take the field name bare, without braces",
+			d.attr, "Owner"),
+	}
 }
 
 // checkHydroRoot enforces the patch-boundary rule: an event binding needs
@@ -298,6 +418,14 @@ func isFieldPath(s string) bool {
 func directiveRefs(dirs []directive) []structRef {
 	var refs []structRef
 	for _, d := range dirs {
+		switch d.name {
+		case kindChildTag:
+			refs = append(refs, structRef{expr: d.expr, pos: d.pos, kind: refChildTag})
+			continue
+		case kindInput:
+			refs = append(refs, structRef{expr: d.expr, pos: d.pos, kind: refInput, binding: d.attr, sel: d.sel, namePos: d.namePos})
+			continue
+		}
 		k := kindByCanonical(d.name)
 		if k == nil || k.ref == nil {
 			continue

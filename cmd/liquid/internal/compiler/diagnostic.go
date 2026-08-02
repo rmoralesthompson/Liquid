@@ -48,6 +48,17 @@ const (
 	// CodeMissingCSRFField reports a template with a <form> on a component
 	// whose struct lacks the CSRFToken string field the framework fills (D15).
 	CodeMissingCSRFField Code = "LSX011"
+	// CodeUnknownChildSelector reports a child-selector element whose tag no
+	// component in the package declares (D14).
+	CodeUnknownChildSelector Code = "LSX012"
+	// CodeBadInputBinding reports an [input] binding that cannot copy at
+	// render: a malformed expression, a child field that does not exist, or
+	// a parent value not assignable to the child field.
+	CodeBadInputBinding Code = "LSX013"
+	// CodeChildBindingUnsupported reports an event binding or [hydroId] on a
+	// child-selector element, which the child's render replaces wholesale —
+	// such bindings belong inside the child's own template.
+	CodeChildBindingUnsupported Code = "LSX014"
 )
 
 // Diagnostic is one structured compiler finding: the literal contract an
