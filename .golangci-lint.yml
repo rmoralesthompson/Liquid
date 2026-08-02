@@ -29,7 +29,7 @@ linters-settings:
   
   goimports:
     # Separates imports into 3 distinct blocks automatically
-    local-prefixes: my-go-app 
+    local-prefixes: github.com/rmoralesthompson/liquid
 
   gocyclo:
     min-complexity: 15 # Flags overly complex or unreadable functions
