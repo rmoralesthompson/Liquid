@@ -53,6 +53,26 @@ type ActionProvider interface {
 type hydroState struct {
 	inst reflect.Value
 	rt   *route
+	// subs are the instance's declared subject bindings. Every render of the
+	// instance — event dispatch or pump push — first applies them under the
+	// dispatch mutex, so a handler that emits to a subject it observes sees
+	// the emission in its own response patch.
+	subs []Subscription
+}
+
+// renderLocked applies the instance's subject bindings and renders it —
+// the one sequence every re-render (event dispatch or pump push) goes
+// through, so both always reflect current subject state. Callers hold the
+// owning session's dispatch mutex (D20.1).
+func (st *hydroState) renderLocked() (string, error) {
+	for _, sub := range st.subs {
+		sub.apply()
+	}
+	var buf bytes.Buffer
+	if err := st.rt.tmpl.Execute(&buf, st.inst.Interface()); err != nil {
+		return "", fmt.Errorf("rendering %s: %w", st.rt.prototype.Elem().Type().Name(), err)
+	}
+	return buf.String(), nil
 }
 
 // The registry's default caps: unauthenticated traffic must not grow it
@@ -68,6 +88,10 @@ const (
 	DefaultSessionIdleTimeout = time.Hour
 	// DefaultMaxEventBytes is the Limits.MaxEventBytes default: 64 KiB.
 	DefaultMaxEventBytes = 64 << 10
+	// DefaultMaxStreamsPerSession is the Limits.MaxStreamsPerSession
+	// default: enough for a handful of tabs, small enough that a
+	// cookie-holder cannot pin goroutines without bound.
+	DefaultMaxStreamsPerSession = 8
 )
 
 // Limits bounds the in-memory session registry (D20). The registry is always
@@ -90,6 +114,11 @@ type Limits struct {
 	// body is read — an oversized event is refused with 413 without being
 	// parsed. Default DefaultMaxEventBytes.
 	MaxEventBytes int64
+	// MaxStreamsPerSession caps open SSE connections under one session. At
+	// the cap, a new connection disconnects the session's oldest — the
+	// dropped browser reconnects into a full re-render (D20). Default
+	// DefaultMaxStreamsPerSession.
+	MaxStreamsPerSession int
 }
 
 // withDefaults fills unset (zero or negative) fields with their documented
@@ -107,6 +136,9 @@ func (l Limits) withDefaults() Limits {
 	if l.MaxEventBytes <= 0 {
 		l.MaxEventBytes = DefaultMaxEventBytes
 	}
+	if l.MaxStreamsPerSession <= 0 {
+		l.MaxStreamsPerSession = DefaultMaxStreamsPerSession
+	}
 	return l
 }
 
@@ -115,6 +147,23 @@ func (l Limits) withDefaults() Limits {
 type hydroEntry struct {
 	id string
 	st *hydroState
+	// stop tears down the instance's subscription pump, nil when the
+	// component observes nothing. It runs (idempotently) wherever the entry
+	// leaves the registry — subscriptions live exactly as long as their
+	// entry (D20).
+	stop func()
+	// prime nudges the pump to push the instance's current state, nil when
+	// there is no pump. A connecting stream runs every prime in its session
+	// so the client starts from current state — the connect-time half of
+	// D20's "full re-render, no replay".
+	prime func()
+}
+
+// stopPump runs the entry's teardown, if it has one.
+func (e *hydroEntry) stopPump() {
+	if e.stop != nil {
+		e.stop()
+	}
 }
 
 // hydroSession is one browser session's live instances, evicting the least
@@ -125,6 +174,19 @@ type hydroSession struct {
 	entries    map[string]*list.Element // hydroID → element in lru
 	lru        *list.List               // of *hydroEntry; front is the eviction candidate
 	dispatch   sync.Mutex               // serializes event dispatch for the whole session (D20.1); never held with the registry's mu
+	streams    []*sseStream             // open SSE connections, oldest first; bounded, closed when the session goes (D3/D20)
+}
+
+// shutdown disconnects everything tied to the session's lifetime: every
+// entry's subscription pump and every open SSE stream. Called wherever a
+// session leaves the registry, with the registry's mu held.
+func (s *hydroSession) shutdown() {
+	for elem := s.lru.Front(); elem != nil; elem = elem.Next() {
+		elem.Value.(*hydroEntry).stopPump()
+	}
+	for _, stream := range s.streams {
+		stream.close()
+	}
 }
 
 // touchEntry returns hydroID's live entry marked most recently used, or nil.
@@ -142,12 +204,14 @@ func (s *hydroSession) touchEntry(hydroID string) *hydroEntry {
 // session's least recently used entry at the cap.
 func (s *hydroSession) putEntry(hydroID string, st *hydroState, limit int) {
 	if e := s.touchEntry(hydroID); e != nil {
-		e.st = st
+		e.stopPump()
+		e.st, e.stop, e.prime = st, nil, nil
 		return
 	}
 	if s.lru.Len() >= limit {
 		evict := s.lru.Remove(s.lru.Front()).(*hydroEntry)
 		delete(s.entries, evict.id)
+		evict.stopPump()
 	}
 	s.entries[hydroID] = s.lru.PushBack(&hydroEntry{id: hydroID, st: st})
 }
@@ -173,6 +237,7 @@ func (h *hydroRegistry) touchSession(sessionID string, now time.Time, idle time.
 	if now.Sub(sess.lastActive) > idle {
 		h.lru.Remove(elem)
 		delete(h.sessions, sessionID)
+		sess.shutdown()
 		return nil
 	}
 	sess.lastActive = now
@@ -194,13 +259,16 @@ func (h *hydroRegistry) expireIdle(now time.Time, idle time.Duration) {
 		}
 		h.lru.Remove(front)
 		delete(h.sessions, sess.id)
+		sess.shutdown()
 	}
 }
 
-// put registers a live instance under its session and hydro tokens. Idle
-// sessions are swept first; then a cap breach evicts the least recently used
-// session or the session's oldest entry.
-func (h *hydroRegistry) put(sessionID, hydroID string, st *hydroState, now time.Time, limits Limits) {
+// put registers a live instance under its session and hydro tokens,
+// returning the owning session (whose dispatch mutex and streams a
+// subscription pump rides on). Idle sessions are swept first; then a cap
+// breach evicts the least recently used session or the session's oldest
+// entry.
+func (h *hydroRegistry) put(sessionID, hydroID string, st *hydroState, now time.Time, limits Limits) *hydroSession {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.sessions == nil {
@@ -213,11 +281,34 @@ func (h *hydroRegistry) put(sessionID, hydroID string, st *hydroState, now time.
 		if h.lru.Len() >= limits.MaxSessions {
 			evict := h.lru.Remove(h.lru.Front()).(*hydroSession)
 			delete(h.sessions, evict.id)
+			evict.shutdown()
 		}
 		sess = &hydroSession{id: sessionID, lastActive: now, entries: make(map[string]*list.Element), lru: list.New()}
 		h.sessions[sessionID] = h.lru.PushBack(sess)
 	}
 	sess.putEntry(hydroID, st, limits.MaxComponentsPerSession)
+	return sess
+}
+
+// attachPump wires a freshly started pump — its teardown and its
+// current-state prime — to its registry entry, reporting false when the
+// entry was already evicted in the window since put; the caller must then
+// run stop itself, since no eviction path ever will.
+func (h *hydroRegistry) attachPump(sessionID, hydroID string, stop, prime func()) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	elem, ok := h.sessions[sessionID]
+	if !ok {
+		return false
+	}
+	sess := elem.Value.(*hydroSession)
+	entry, ok := sess.entries[hydroID]
+	if !ok {
+		return false
+	}
+	e := entry.Value.(*hydroEntry)
+	e.stop, e.prime = stop, prime
+	return true
 }
 
 // get returns the live instance for a session/hydro token pair along with
@@ -421,10 +512,9 @@ func (a *App) serveHydroEvent(w http.ResponseWriter, r *http.Request) {
 	env := Envelope{Redirect: reply.redirect}
 	var renderErr error
 	if env.Redirect == "" {
-		// Only a patch answer needs the re-render (D19).
-		var buf bytes.Buffer
-		renderErr = st.rt.tmpl.Execute(&buf, st.inst.Interface())
-		env.Patch = buf.String()
+		// Only a patch answer needs the re-render (D19); renderLocked makes
+		// it reflect any subject emission the handler just made.
+		env.Patch, renderErr = st.renderLocked()
 	}
 	sess.dispatch.Unlock()
 	if renderErr != nil {

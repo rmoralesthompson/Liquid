@@ -88,6 +88,42 @@
     fire(root, bound.dataset.liquidAction, undefined);
   });
 
+  // Server push (D3): interactive pages hold one SSE stream for the whole
+  // browser session; pushed patches are applied at their [data-hydro-id]
+  // boundary. A reconnect — the server dropped us, or the network did —
+  // means patches may have been missed, and there is no replay (D20): the
+  // page reloads into a full re-render of current state instead.
+  function connect() {
+    if (!document.querySelector("[data-hydro-id]")) return;
+    const source = new EventSource("/hydro-sse");
+    let everConnected = false;
+    source.addEventListener("open", () => {
+      if (everConnected) {
+        source.close();
+        window.location.reload();
+        return;
+      }
+      everConnected = true;
+    });
+    source.addEventListener("error", () => {
+      // Transient drops leave readyState CONNECTING and the browser retries
+      // (landing in the reload above). CLOSED is fatal — the server refused
+      // the stream, typically an expired or evicted session — and only a
+      // fresh page load can re-establish one.
+      if (source.readyState === EventSource.CLOSED) {
+        window.location.reload();
+      }
+    });
+    source.addEventListener("patch", (e) => {
+      const { hydroId, patch } = JSON.parse(e.data);
+      const root = document.querySelector(
+        `[data-hydro-id="${CSS.escape(hydroId)}"]`,
+      );
+      if (root) applyPatch(root, patch);
+    });
+  }
+  connect();
+
   document.addEventListener("submit", (e) => {
     const form = e.target;
     if (!(form instanceof HTMLFormElement)) return;
