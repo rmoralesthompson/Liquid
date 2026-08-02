@@ -1,0 +1,47 @@
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+
+linters:
+  disable-all: true
+  enable:
+    # Error handling
+    - errcheck      # Checks for unchecked errors
+    - wrapcheck     # Enforces error wrapping across package boundaries
+
+    # Context & Concurrency
+    - contextcheck  # Verifies that context is correctly propagated
+    - govet         # Standard Go verification tool (shadow variables, loops)
+
+    # Style, Naming & Structure
+    - goconst       # Finds repeated strings that should be constants
+    - gocyclo       # Checks code complexity (keeps functions short)
+    - goimports     # Fixes and checks import grouping (stdlib, third-party, local)
+    - revive        # Drop-in replacement for golint (naming, comments)
+    - stylecheck    # Enforces Go style guide rules
+    - unused        # Finds unused code, variables, and constants
+
+linters-settings:
+  govet:
+    enable-all: true
+    disable:
+      - fieldalignment # Only enable if strict memory optimization is needed
+  
+  goimports:
+    # Separates imports into 3 distinct blocks automatically
+    local-prefixes: my-go-app 
+
+  gocyclo:
+    min-complexity: 15 # Flags overly complex or unreadable functions
+
+  revive:
+    rules:
+      - name: exported
+        arguments: [sayArguments] # Requires comments on public items
+      - name: argument-limit
+        arguments: [5] # Prevents massive function signatures
+
+issues:
+  exclude-use-default: false
+  max-issues-per-linter: 0
+  max-same-issues: 0
