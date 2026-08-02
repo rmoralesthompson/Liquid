@@ -1,0 +1,3 @@
+<div>
+  <app-user-card [name]="Count"></app-user-card>
+</div>

@@ -21,24 +21,47 @@ import (
 type App struct {
 	logger     *slog.Logger
 	routes     []*route
-	services   []reflect.Value  // Provide'd singletons, in registration order
-	static     http.Handler     // file server mounted at /static/, nil until Static
-	hydro      hydroRegistry    // live interactive instances (D15)
-	csrfSecret []byte           // HMAC key for CSRF tokens, minted per process (D15)
-	limits     Limits           // registry and request bounds, defaults applied (D20)
-	now        func() time.Time // the App's clock; replaceable in tests for idle-expiry control
+	components map[string]*registration // selector → render machinery; child selectors resolve here (D14)
+	services   []reflect.Value          // Provide'd singletons, in registration order
+	static     http.Handler             // file server mounted at /static/, nil until Static
+	hydro      hydroRegistry            // live interactive instances (D15)
+	csrfSecret []byte                   // HMAC key for CSRF tokens, minted per process (D15)
+	limits     Limits                   // registry and request bounds, defaults applied (D20)
+	now        func() time.Time         // the App's clock; replaceable in tests for idle-expiry control
+}
+
+// registration is one component type's render machinery, resolved once when
+// the component is first registered (via Route or Register) and shared by
+// every occurrence — routed pages and nested child renders alike.
+type registration struct {
+	selector    string
+	prototype   reflect.Value // pointer to the registered component struct
+	tmplText    string
+	tmpl        *template.Template
+	injections  []injection       // dependencies resolved at registration (D8)
+	hydroField  int               // index of the HydroID field; -1 when not interactive
+	csrfField   int               // index of the CSRFToken field; -1 when the component has none
+	actions     map[string]action // allowlisted action → dispatch shape, resolved at registration (D10)
+	hasChildren bool              // template nests child selectors; renders bind liquidChild to a scope
+}
+
+// newInstance returns a fresh component instance seeded from the prototype
+// with its registered dependencies injected — never a shared one (per-request
+// invariant).
+func (reg *registration) newInstance() reflect.Value {
+	inst := reflect.New(reg.prototype.Elem().Type())
+	inst.Elem().Set(reg.prototype.Elem())
+	for _, inj := range reg.injections {
+		inst.Elem().Field(inj.field).Set(inj.svc)
+	}
+	return inst
 }
 
 type route struct {
-	pattern      []string      // path segments; a ":name" segment binds a param
-	prototype    reflect.Value // pointer to the registered component struct
-	tmpl         *template.Template
+	pattern      []string // path segments; a ":name" segment binds a param
+	reg          *registration
 	guards       []Guard
-	injections   []injection       // dependencies resolved at registration (D8)
-	fallbackHead Head              // shell head for components without HeadProvider
-	hydroField   int               // index of the HydroID field; -1 when not interactive
-	csrfField    int               // index of the CSRFToken field; -1 when the component has none
-	actions      map[string]action // allowlisted action → dispatch shape, resolved at registration (D10)
+	fallbackHead Head // shell head for components without HeadProvider
 }
 
 // RouteOption configures one route at registration.
@@ -166,50 +189,93 @@ func New(opts ...Option) *App {
 // reference would be shared mutable state across requests. Per-request data
 // belongs in lifecycle hooks, not the prototype.
 func (a *App) Route(path string, c Component, opts ...RouteOption) error {
-	v := reflect.ValueOf(c)
-	if v.Kind() != reflect.Pointer || v.Elem().Kind() != reflect.Struct {
-		return fmt.Errorf("registering route %s: component must be a pointer to a struct, got %T", path, c)
-	}
-	if err := validatePrototype(v.Elem(), v.Elem().Type().Name()); err != nil {
-		return fmt.Errorf("registering route %s: %w", path, err)
-	}
-	if err := validatePathParamTags(v.Elem().Type()); err != nil {
-		return fmt.Errorf("registering route %s: %w", path, err)
-	}
-
-	injections, err := a.resolveInjections(v.Elem().Type())
+	reg, err := a.register(c)
 	if err != nil {
 		return fmt.Errorf("registering route %s: %w", path, err)
 	}
-	actions, err := resolveActions(v)
-	if err != nil {
+	if err := validatePathParamTags(reg.prototype.Elem().Type()); err != nil {
 		return fmt.Errorf("registering route %s: %w", path, err)
-	}
-	if _, ok := c.(SubscriptionProvider); ok && hydroIDField(v.Elem().Type()) < 0 {
-		return fmt.Errorf("registering route %s: component %s declares subscriptions but has no HydroID string field to push patches against",
-			path, v.Elem().Type().Name())
-	}
-
-	tmpl, err := template.New(c.Selector()).Parse(c.Template())
-	if err != nil {
-		return fmt.Errorf("parsing template for %s: %w", c.Selector(), err)
 	}
 
 	rt := &route{
 		pattern:      splitPath(path),
-		prototype:    v,
-		tmpl:         tmpl,
-		injections:   injections,
+		reg:          reg,
 		fallbackHead: Head{Title: c.Selector()},
-		hydroField:   hydroIDField(v.Elem().Type()),
-		csrfField:    csrfTokenField(v.Elem().Type()),
-		actions:      actions,
 	}
 	for _, opt := range opts {
 		opt(rt)
 	}
 	a.routes = append(a.routes, rt)
 	return nil
+}
+
+// Register adds a component to the App's registry so parent templates can
+// nest it by selector (D14). Routing a component registers it too; Register
+// is for components that only ever render as children. Registering the same
+// component type again is a no-op; a selector claimed by a different type is
+// an error.
+func (a *App) Register(c Component) error {
+	if _, err := a.register(c); err != nil {
+		return fmt.Errorf("registering component %T: %w", c, err)
+	}
+	return nil
+}
+
+// register resolves a component's render machinery once and stores it in the
+// selector registry. The template is parsed here, at registration — a
+// template error is reported now, never at request time.
+func (a *App) register(c Component) (*registration, error) {
+	v := reflect.ValueOf(c)
+	if v.Kind() != reflect.Pointer || v.Elem().Kind() != reflect.Struct {
+		return nil, fmt.Errorf("component must be a pointer to a struct, got %T", c)
+	}
+	selector := c.Selector()
+	if existing, ok := a.components[selector]; ok {
+		if existing.prototype.Elem().Type() == v.Elem().Type() {
+			return existing, nil
+		}
+		return nil, fmt.Errorf("selector %s is already registered by component %s",
+			selector, existing.prototype.Elem().Type().Name())
+	}
+	if err := validatePrototype(v.Elem(), v.Elem().Type().Name()); err != nil {
+		return nil, err
+	}
+
+	injections, err := a.resolveInjections(v.Elem().Type())
+	if err != nil {
+		return nil, err
+	}
+	actions, err := resolveActions(v)
+	if err != nil {
+		return nil, err
+	}
+	if _, ok := c.(SubscriptionProvider); ok && hydroIDField(v.Elem().Type()) < 0 {
+		return nil, fmt.Errorf("component %s declares subscriptions but has no HydroID string field to push patches against",
+			v.Elem().Type().Name())
+	}
+
+	tmplText := c.Template()
+	tmpl, err := template.New(selector).Funcs(registrationStubFuncs).Parse(tmplText)
+	if err != nil {
+		return nil, fmt.Errorf("parsing template for %s: %w", selector, err)
+	}
+
+	reg := &registration{
+		selector:    selector,
+		prototype:   v,
+		tmplText:    tmplText,
+		tmpl:        tmpl,
+		injections:  injections,
+		hydroField:  hydroIDField(v.Elem().Type()),
+		csrfField:   csrfTokenField(v.Elem().Type()),
+		actions:     actions,
+		hasChildren: tmpl.Tree != nil && usesLiquidChild(tmpl.Tree.Root),
+	}
+	if a.components == nil {
+		a.components = make(map[string]*registration)
+	}
+	a.components[selector] = reg
+	return reg, nil
 }
 
 // validatePathParamTags rejects pathParam tags the router cannot bind:
@@ -351,12 +417,12 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // registry and, for a SubscriptionProvider, activates its subject bindings:
 // the pump starts and its teardown is wired to the registry entry, so the
 // subscriptions live exactly as long as the entry (D20).
-func (a *App) registerHydro(sessionID, hydroID string, inst reflect.Value, rt *route) {
+func (a *App) registerHydro(sessionID, hydroID string, inst reflect.Value, reg *registration) {
 	var subs []Subscription
 	if sp, ok := inst.Interface().(SubscriptionProvider); ok {
 		subs = sp.Subscriptions()
 	}
-	st := &hydroState{inst: inst, rt: rt, subs: subs}
+	st := &hydroState{inst: inst, reg: reg, subs: subs}
 	sess := a.hydro.put(sessionID, hydroID, st, a.now(), a.limits)
 	if len(subs) == 0 {
 		return
@@ -372,8 +438,8 @@ func (a *App) registerHydro(sessionID, hydroID string, inst reflect.Value, rt *r
 // mintRenderTokens establishes one session-bound render's values: the
 // session ID, a fresh hydro token when the component is interactive, and
 // the render's CSRF token (D15).
-func (a *App) mintRenderTokens(w http.ResponseWriter, r *http.Request, rt *route) (sessionID, hydroID, csrf string, err error) {
-	if sessionID, err = a.ensureSession(w, r); err == nil && rt.hydroField >= 0 {
+func (a *App) mintRenderTokens(w http.ResponseWriter, r *http.Request, reg *registration) (sessionID, hydroID, csrf string, err error) {
+	if sessionID, err = a.ensureSession(w, r); err == nil && reg.hydroField >= 0 {
 		hydroID, err = randomToken()
 	}
 	if err != nil {
@@ -420,32 +486,40 @@ func (a *App) runGuards(w http.ResponseWriter, r *http.Request, rt *route, ctx C
 // renderRoute runs the component lifecycle on a fresh instance — param
 // binding, OnInit, buffered render — and writes the result.
 func (a *App) renderRoute(w http.ResponseWriter, r *http.Request, rt *route, params map[string]string, ctx Ctx) {
-	inst := reflect.New(rt.prototype.Elem().Type())
-	inst.Elem().Set(rt.prototype.Elem())
-	for _, inj := range rt.injections {
-		inst.Elem().Field(inj.field).Set(inj.svc)
-	}
+	reg := rt.reg
+	inst := reg.newInstance()
 	bindPathParams(inst.Elem(), params)
 
 	// A component is session-bound when it has hydro state to register or a
 	// CSRF token to carry; either way the render mints the session, a fresh
 	// CSRF token for the runtime's event payloads (D15), and — for hydro
-	// components — the patch-boundary token.
+	// components — the patch-boundary token. A nested child may also bind the
+	// render to a session (its own hydro or CSRF plumbing), so the scope
+	// establishes the session lazily on first need; the render is buffered,
+	// so the cookie can still be set then.
 	var sessionID, hydroID, csrf string
-	if rt.hydroField >= 0 || rt.csrfField >= 0 {
+	ensure := func() (string, error) {
+		if sessionID != "" {
+			return sessionID, nil
+		}
 		var err error
-		if sessionID, hydroID, csrf, err = a.mintRenderTokens(w, r, rt); err != nil {
+		sessionID, err = a.ensureSession(w, r)
+		return sessionID, err
+	}
+	if reg.hydroField >= 0 || reg.csrfField >= 0 {
+		var err error
+		if sessionID, hydroID, csrf, err = a.mintRenderTokens(w, r, reg); err != nil {
 			a.logger.Error("establishing hydro session", "path", r.URL.Path, "error", err)
 			a.errorPage(w)
 			return
 		}
 		ctx.session = sessionID
 	}
-	if rt.hydroField >= 0 {
-		inst.Elem().Field(rt.hydroField).SetString(hydroID)
+	if reg.hydroField >= 0 {
+		inst.Elem().Field(reg.hydroField).SetString(hydroID)
 	}
-	if rt.csrfField >= 0 {
-		inst.Elem().Field(rt.csrfField).SetString(csrf)
+	if reg.csrfField >= 0 {
+		inst.Elem().Field(reg.csrfField).SetString(csrf)
 	}
 
 	if init, ok := inst.Interface().(Initializer); ok {
@@ -456,29 +530,40 @@ func (a *App) renderRoute(w http.ResponseWriter, r *http.Request, rt *route, par
 		}
 	}
 
-	var buf bytes.Buffer
-	if err := rt.tmpl.Execute(&buf, inst.Interface()); err != nil {
+	body, err := a.executeComponent(reg, inst, &renderScope{a: a, ensure: ensure})
+	if err != nil {
 		a.logger.Error("rendering component", "path", r.URL.Path, "error", err)
 		a.errorPage(w)
 		return
 	}
-	if rt.hydroField >= 0 {
-		a.registerHydro(sessionID, hydroID, inst, rt)
+	if reg.hydroField >= 0 {
+		a.registerHydro(sessionID, hydroID, inst, reg)
 	}
-
+	// A child render may have bound the page to a session the route's own
+	// component never asked for; the shell still needs that render's CSRF
+	// token so the runtime script can authenticate the child's events (D15).
+	if csrf == "" && sessionID != "" {
+		csrf = mintCSRF(a.csrfSecret, sessionID, a.limits.SessionIdleTimeout, a.now())
+	}
 	head := rt.fallbackHead
 	if hp, ok := inst.Interface().(HeadProvider); ok {
 		head = hp.Head()
 	}
+	a.writeShell(w, r.URL.Path, head, csrf, body)
+}
+
+// writeShell wraps a rendered component body in the document shell and
+// writes the complete page.
+func (a *App) writeShell(w http.ResponseWriter, path string, head Head, csrf, body string) {
 	var page bytes.Buffer
-	if err := shellTmpl.Execute(&page, shellData{Head: head, CSRF: csrf, Body: template.HTML(buf.String())}); err != nil {
-		a.logger.Error("rendering document shell", "path", r.URL.Path, "error", err)
+	if err := shellTmpl.Execute(&page, shellData{Head: head, CSRF: csrf, Body: template.HTML(body)}); err != nil {
+		a.logger.Error("rendering document shell", "path", path, "error", err)
 		a.errorPage(w)
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if _, err := page.WriteTo(w); err != nil {
-		a.logger.Error("writing response", "path", r.URL.Path, "error", err)
+		a.logger.Error("writing response", "path", path, "error", err)
 	}
 }

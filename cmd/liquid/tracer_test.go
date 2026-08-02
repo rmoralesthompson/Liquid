@@ -119,6 +119,83 @@ func TestBuildThenClickRoundTripsEndToEnd(t *testing.T) {
 	}
 }
 
+// nestedGen holds what liquid build generated for the nested fixture's three
+// components.
+var nestedGen struct {
+	dashboardText string
+	userCardText  string
+	avatarText    string
+}
+
+// compiledDashboard pairs the nested fixture's parent struct with the
+// compiler output, joining the child-selector compile seam to the runtime's
+// component registry.
+type compiledDashboard struct {
+	Title string
+	Owner string
+}
+
+func (c *compiledDashboard) Selector() string { return "app-dashboard" }
+
+func (c *compiledDashboard) Template() string { return nestedGen.dashboardText }
+
+// compiledUserCard pairs the nested fixture's child struct with the compiler
+// output.
+type compiledUserCard struct {
+	Name string
+}
+
+func (c *compiledUserCard) Selector() string { return "app-user-card" }
+
+func (c *compiledUserCard) Template() string { return nestedGen.userCardText }
+
+// compiledAvatar pairs the nested fixture's grandchild struct with the
+// compiler output.
+type compiledAvatar struct {
+	Initials string
+}
+
+func (c *compiledAvatar) Selector() string { return "app-avatar" }
+
+func (c *compiledAvatar) Template() string { return nestedGen.avatarText }
+
+func TestBuildThenServeRendersNestedChildrenEndToEnd(t *testing.T) {
+	dir := t.TempDir()
+	copyFixtureDir(t, filepath.Join("internal", "compiler", "testdata", "nested"), dir)
+
+	if err := run([]string{"build", dir}, io.Discard); err != nil {
+		t.Fatalf("liquid build: %v", err)
+	}
+	nestedGen.dashboardText = generatedTemplateText(t, filepath.Join(dir, "dashboard_gen.go"))
+	nestedGen.userCardText = generatedTemplateText(t, filepath.Join(dir, "user_card_gen.go"))
+	nestedGen.avatarText = generatedTemplateText(t, filepath.Join(dir, "avatar_gen.go"))
+
+	app := liquid.New()
+	if err := app.Register(&compiledAvatar{}); err != nil {
+		t.Fatalf("Register(avatar): %v", err)
+	}
+	if err := app.Register(&compiledUserCard{}); err != nil {
+		t.Fatalf("Register(userCard): %v", err)
+	}
+	if err := app.Route("/", &compiledDashboard{Title: "Ops", Owner: "Ada"}); err != nil {
+		t.Fatalf("Route: %v", err)
+	}
+
+	page := liquidtest.New(t, app).Get("/")
+	if page.Code != http.StatusOK {
+		t.Fatalf("GET / = %d, want 200\n--- body ---\n%s", page.Code, page.Body)
+	}
+	if got := page.Text("h1"); got != "Ops" {
+		t.Errorf(`parent render Text("h1") = %q, want "Ops"`, got)
+	}
+	if got := page.Text(".owner"); got != "Ada" {
+		t.Errorf(`child render Text(".owner") = %q, want "Ada" — the compiled [input] binding must reach the child`, got)
+	}
+	if got := page.Text(".avatar"); got != "Ada" {
+		t.Errorf(`grandchild render Text(".avatar") = %q, want "Ada" — compiled inputs must flow through recursive child renders`, got)
+	}
+}
+
 // renamerGen holds what liquid build generated for the renamer fixture.
 var renamerGen struct {
 	text    string

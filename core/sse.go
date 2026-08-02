@@ -89,7 +89,7 @@ func (a *App) startPump(sess *hydroSession, st *hydroState, hydroID string) (sto
 			case <-dirty:
 			}
 			sess.dispatch.Lock()
-			patch, err := st.renderLocked()
+			patch, err := a.renderStateLocked(st, sess.id)
 			sess.dispatch.Unlock()
 			if err != nil {
 				a.logger.Error("rendering pushed patch", "hydroId", hydroID, "error", err)

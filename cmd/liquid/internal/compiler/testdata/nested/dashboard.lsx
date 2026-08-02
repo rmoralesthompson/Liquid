@@ -1,0 +1,4 @@
+<section class="dash">
+  <h1>{{ Title }}</h1>
+  <app-user-card [name]="Owner"></app-user-card>
+</section>

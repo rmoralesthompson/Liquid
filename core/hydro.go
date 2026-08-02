@@ -1,7 +1,6 @@
 package liquid
 
 import (
-	"bytes"
 	"container/list"
 	"crypto/rand"
 	_ "embed"
@@ -52,7 +51,7 @@ type ActionProvider interface {
 // session's mutex, not per instance (D20).
 type hydroState struct {
 	inst reflect.Value
-	rt   *route
+	reg  *registration
 	// subs are the instance's declared subject bindings. Every render of the
 	// instance — event dispatch or pump push — first applies them under the
 	// dispatch mutex, so a handler that emits to a subject it observes sees
@@ -60,19 +59,18 @@ type hydroState struct {
 	subs []Subscription
 }
 
-// renderLocked applies the instance's subject bindings and renders it —
+// renderStateLocked applies the instance's subject bindings and renders it —
 // the one sequence every re-render (event dispatch or pump push) goes
-// through, so both always reflect current subject state. Callers hold the
-// owning session's dispatch mutex (D20.1).
-func (st *hydroState) renderLocked() (string, error) {
+// through, so both always reflect current subject state. The render scope
+// carries the owning session, so nested children re-render (and re-register,
+// for interactive ones) inside the patch (D14). Callers hold the owning
+// session's dispatch mutex (D20.1).
+func (a *App) renderStateLocked(st *hydroState, sessionID string) (string, error) {
 	for _, sub := range st.subs {
 		sub.apply()
 	}
-	var buf bytes.Buffer
-	if err := st.rt.tmpl.Execute(&buf, st.inst.Interface()); err != nil {
-		return "", fmt.Errorf("rendering %s: %w", st.rt.prototype.Elem().Type().Name(), err)
-	}
-	return buf.String(), nil
+	sc := &renderScope{a: a, ensure: func() (string, error) { return sessionID, nil }}
+	return a.executeComponent(st.reg, st.inst, sc)
 }
 
 // The registry's default caps: unauthenticated traffic must not grow it
@@ -173,7 +171,7 @@ type hydroSession struct {
 	lastActive time.Time                // last request touching this session; idle expiry keys off it
 	entries    map[string]*list.Element // hydroID → element in lru
 	lru        *list.List               // of *hydroEntry; front is the eviction candidate
-	dispatch   sync.Mutex               // serializes event dispatch for the whole session (D20.1); never held with the registry's mu
+	dispatch   sync.Mutex               // serializes event dispatch for the whole session (D20.1); lock order is one-way: dispatch may be held while taking the registry's mu (a re-render registering a nested child does), never the reverse
 	streams    []*sseStream             // open SSE connections, oldest first; bounded, closed when the session goes (D3/D20)
 }
 
@@ -491,7 +489,7 @@ func (a *App) serveHydroEvent(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	act, ok := st.rt.actions[ev.Action]
+	act, ok := st.reg.actions[ev.Action]
 	if !ok {
 		http.NotFound(w, r)
 		return
@@ -512,9 +510,9 @@ func (a *App) serveHydroEvent(w http.ResponseWriter, r *http.Request) {
 	env := Envelope{Redirect: reply.redirect}
 	var renderErr error
 	if env.Redirect == "" {
-		// Only a patch answer needs the re-render (D19); renderLocked makes
-		// it reflect any subject emission the handler just made.
-		env.Patch, renderErr = st.renderLocked()
+		// Only a patch answer needs the re-render (D19); renderStateLocked
+		// makes it reflect any subject emission the handler just made.
+		env.Patch, renderErr = a.renderStateLocked(st, ck.Value)
 	}
 	sess.dispatch.Unlock()
 	if renderErr != nil {

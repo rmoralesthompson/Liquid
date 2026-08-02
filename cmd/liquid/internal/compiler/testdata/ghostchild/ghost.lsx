@@ -1,0 +1,3 @@
+<div class="wrap">
+  <app-user-crd [name]="Owner"></app-user-crd>
+</div>
