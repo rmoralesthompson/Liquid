@@ -1,17 +1,25 @@
 # Binaries and build output
 /bin/
 *.exe
+*.exe~
+*.dll
+*.so
+*.dylib
 *.test
 *.out
+
+# Coverage
+coverage.*
+*.coverprofile
+profile.cov
 
 # Go workspace / tooling
 go.work
 go.work.sum
 /vendor/
 
-# Coverage
-coverage.*
-*.coverprofile
+# Environment
+.env
 
 # Local-only Claude settings (personal permissions; not shared config)
 .claude/settings.local.json
