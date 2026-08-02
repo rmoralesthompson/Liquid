@@ -28,7 +28,7 @@ type HeadProvider interface {
 // component supplies the body, Head supplies title and meta. The shell is
 // what makes a route a complete document without a separate layout system.
 const shellHTML = `<!doctype html>
-<html><head><meta charset="utf-8"><title>{{.Head.Title}}</title>{{range .Head.Meta}}<meta name="{{.Name}}" content="{{.Content}}">{{end}}</head>
+<html><head><meta charset="utf-8"><title>{{.Head.Title}}</title>{{range .Head.Meta}}<meta name="{{.Name}}" content="{{.Content}}">{{end}}<script src="/liquid/runtime.js" defer></script></head>
 <body>{{.Body}}</body></html>
 `
 

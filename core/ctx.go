@@ -14,6 +14,15 @@ type Ctx struct {
 	req    *http.Request
 }
 
+// NewCtx assembles a Ctx from a request and bound route params. The
+// framework builds its own Ctx per request; this constructor exists so test
+// harnesses (liquidtest) can hand one to lifecycle hooks directly. req must
+// be non-nil — liquidtest.Ctx supplies a default request for callers that
+// have none.
+func NewCtx(req *http.Request, params map[string]string) Ctx {
+	return Ctx{Context: req.Context(), params: params, req: req}
+}
+
 // Param returns the value bound to the named :param route segment, or ""
 // when the route has no such segment.
 func (c Ctx) Param(name string) string { return c.params[name] }
