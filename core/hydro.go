@@ -2,10 +2,12 @@ package liquid
 
 import (
 	"bytes"
+	"container/list"
 	"crypto/rand"
 	_ "embed"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"reflect"
@@ -46,83 +48,203 @@ type ActionProvider interface {
 }
 
 // hydroState is one live interactive component instance, registered at render
-// and mutated by dispatched events. mu serializes dispatch: events for the
-// same instance never run concurrently (D20).
+// and mutated by dispatched events. Dispatch is serialized by the owning
+// session's mutex, not per instance (D20).
 type hydroState struct {
-	mu   sync.Mutex
 	inst reflect.Value
 	rt   *route
 }
 
-// The registry's hard caps: unauthenticated traffic must not grow it without
-// limit, so both dimensions evict oldest-first at a fixed bound. Configurable
-// caps, LRU ordering, idle-timeout GC, and request body limits are session
-// hardening, tracked on ticket #9.
+// The registry's default caps: unauthenticated traffic must not grow it
+// without limit, so both dimensions evict at a bound even when the app
+// configures nothing (D20).
 const (
-	maxSessions        = 1024
-	maxHydroPerSession = 64
+	// DefaultMaxSessions is the Limits.MaxSessions default.
+	DefaultMaxSessions = 1024
+	// DefaultMaxComponentsPerSession is the Limits.MaxComponentsPerSession
+	// default.
+	DefaultMaxComponentsPerSession = 64
+	// DefaultSessionIdleTimeout is the Limits.SessionIdleTimeout default.
+	DefaultSessionIdleTimeout = time.Hour
+	// DefaultMaxEventBytes is the Limits.MaxEventBytes default: 64 KiB.
+	DefaultMaxEventBytes = 64 << 10
 )
 
-// hydroSession is one browser session's live instances, in insertion order
-// so the oldest is evicted at the cap.
-type hydroSession struct {
-	states map[string]*hydroState
-	order  []string
+// Limits bounds the in-memory session registry (D20). The registry is always
+// bounded: a zero or negative field means its documented default, and there
+// is no unlimited setting.
+type Limits struct {
+	// MaxSessions caps live sessions across the App. At the cap, minting a
+	// new session evicts the oldest. Default DefaultMaxSessions.
+	MaxSessions int
+	// MaxComponentsPerSession caps live component instances under one
+	// session. At the cap, registering a new instance evicts the session's
+	// oldest. Default DefaultMaxComponentsPerSession.
+	MaxComponentsPerSession int
+	// SessionIdleTimeout is how long a session may go without a request
+	// before it expires and its live instances are dropped (D2). CSRF token
+	// expiry tracks the same window (D15). Default
+	// DefaultSessionIdleTimeout.
+	SessionIdleTimeout time.Duration
+	// MaxEventBytes caps the /hydro-event request body, enforced while the
+	// body is read — an oversized event is refused with 413 without being
+	// parsed. Default DefaultMaxEventBytes.
+	MaxEventBytes int64
 }
 
-// hydroRegistry maps sessionID → hydroID → live instance (D15). The zero
-// value is ready to use.
+// withDefaults fills unset (zero or negative) fields with their documented
+// defaults.
+func (l Limits) withDefaults() Limits {
+	if l.MaxSessions <= 0 {
+		l.MaxSessions = DefaultMaxSessions
+	}
+	if l.MaxComponentsPerSession <= 0 {
+		l.MaxComponentsPerSession = DefaultMaxComponentsPerSession
+	}
+	if l.SessionIdleTimeout <= 0 {
+		l.SessionIdleTimeout = DefaultSessionIdleTimeout
+	}
+	if l.MaxEventBytes <= 0 {
+		l.MaxEventBytes = DefaultMaxEventBytes
+	}
+	return l
+}
+
+// hydroEntry is one live instance under its hydro token — the unit the
+// per-session LRU orders.
+type hydroEntry struct {
+	id string
+	st *hydroState
+}
+
+// hydroSession is one browser session's live instances, evicting the least
+// recently used at the cap (D20).
+type hydroSession struct {
+	id         string
+	lastActive time.Time                // last request touching this session; idle expiry keys off it
+	entries    map[string]*list.Element // hydroID → element in lru
+	lru        *list.List               // of *hydroEntry; front is the eviction candidate
+	dispatch   sync.Mutex               // serializes event dispatch for the whole session (D20.1); never held with the registry's mu
+}
+
+// touchEntry returns hydroID's live entry marked most recently used, or nil.
+// Callers hold the registry's mu.
+func (s *hydroSession) touchEntry(hydroID string) *hydroEntry {
+	elem, ok := s.entries[hydroID]
+	if !ok {
+		return nil
+	}
+	s.lru.MoveToBack(elem)
+	return elem.Value.(*hydroEntry)
+}
+
+// putEntry registers a live instance under its hydro token, evicting the
+// session's least recently used entry at the cap.
+func (s *hydroSession) putEntry(hydroID string, st *hydroState, limit int) {
+	if e := s.touchEntry(hydroID); e != nil {
+		e.st = st
+		return
+	}
+	if s.lru.Len() >= limit {
+		evict := s.lru.Remove(s.lru.Front()).(*hydroEntry)
+		delete(s.entries, evict.id)
+	}
+	s.entries[hydroID] = s.lru.PushBack(&hydroEntry{id: hydroID, st: st})
+}
+
+// hydroRegistry maps sessionID → hydroID → live instance (D15), evicting the
+// least recently used session at the cap (D20). The zero value is ready to
+// use.
 type hydroRegistry struct {
 	mu       sync.Mutex
-	sessions map[string]*hydroSession
-	order    []string // session insertion order, oldest first
+	sessions map[string]*list.Element // sessionID → element in lru
+	lru      *list.List               // of *hydroSession; front is the eviction candidate
 }
 
-// put registers a live instance under its session and hydro tokens, evicting
-// the oldest session or entry when a cap is reached.
-func (h *hydroRegistry) put(sessionID, hydroID string, st *hydroState) {
+// touchSession returns sessionID's live session marked most recently used,
+// or nil. A session idle past the window is expired here — removed, not
+// returned (D2). Callers hold h.mu.
+func (h *hydroRegistry) touchSession(sessionID string, now time.Time, idle time.Duration) *hydroSession {
+	elem, ok := h.sessions[sessionID]
+	if !ok {
+		return nil
+	}
+	sess := elem.Value.(*hydroSession)
+	if now.Sub(sess.lastActive) > idle {
+		h.lru.Remove(elem)
+		delete(h.sessions, sessionID)
+		return nil
+	}
+	sess.lastActive = now
+	h.lru.MoveToBack(elem)
+	return sess
+}
+
+// expireIdle removes every session idle past the window. Touches keep the
+// LRU list ordered by lastActive, so expired sessions are exactly the list's
+// front run. Callers hold h.mu.
+func (h *hydroRegistry) expireIdle(now time.Time, idle time.Duration) {
+	if h.lru == nil {
+		return
+	}
+	for front := h.lru.Front(); front != nil; front = h.lru.Front() {
+		sess := front.Value.(*hydroSession)
+		if now.Sub(sess.lastActive) <= idle {
+			return
+		}
+		h.lru.Remove(front)
+		delete(h.sessions, sess.id)
+	}
+}
+
+// put registers a live instance under its session and hydro tokens. Idle
+// sessions are swept first; then a cap breach evicts the least recently used
+// session or the session's oldest entry.
+func (h *hydroRegistry) put(sessionID, hydroID string, st *hydroState, now time.Time, limits Limits) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.sessions == nil {
-		h.sessions = make(map[string]*hydroSession)
+		h.sessions = make(map[string]*list.Element)
+		h.lru = list.New()
 	}
-	sess := h.sessions[sessionID]
+	h.expireIdle(now, limits.SessionIdleTimeout)
+	sess := h.touchSession(sessionID, now, limits.SessionIdleTimeout)
 	if sess == nil {
-		if len(h.order) >= maxSessions {
-			delete(h.sessions, h.order[0])
-			h.order = h.order[1:]
+		if h.lru.Len() >= limits.MaxSessions {
+			evict := h.lru.Remove(h.lru.Front()).(*hydroSession)
+			delete(h.sessions, evict.id)
 		}
-		sess = &hydroSession{states: make(map[string]*hydroState)}
-		h.sessions[sessionID] = sess
-		h.order = append(h.order, sessionID)
+		sess = &hydroSession{id: sessionID, lastActive: now, entries: make(map[string]*list.Element), lru: list.New()}
+		h.sessions[sessionID] = h.lru.PushBack(sess)
 	}
-	if _, exists := sess.states[hydroID]; !exists {
-		if len(sess.order) >= maxHydroPerSession {
-			delete(sess.states, sess.order[0])
-			sess.order = sess.order[1:]
-		}
-		sess.order = append(sess.order, hydroID)
-	}
-	sess.states[hydroID] = st
+	sess.putEntry(hydroID, st, limits.MaxComponentsPerSession)
 }
 
-// get returns the live instance for a session/hydro token pair, or nil.
-func (h *hydroRegistry) get(sessionID, hydroID string) *hydroState {
+// get returns the live instance for a session/hydro token pair along with
+// its owning session (whose dispatch mutex the caller serializes on), or
+// nils. A hit marks both the session and the entry most recently used; an
+// idle-expired session is removed and misses.
+func (h *hydroRegistry) get(sessionID, hydroID string, now time.Time, idle time.Duration) (*hydroState, *hydroSession) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	sess := h.sessions[sessionID]
+	sess := h.touchSession(sessionID, now, idle)
 	if sess == nil {
-		return nil
+		return nil, nil
 	}
-	return sess.states[hydroID]
+	e := sess.touchEntry(hydroID)
+	if e == nil {
+		return nil, nil
+	}
+	return e.st, sess
 }
 
-// has reports whether sessionID is a live, server-minted session key.
-func (h *hydroRegistry) has(sessionID string) bool {
+// touch reports whether sessionID is a live, server-minted session key.
+// Being presented by a request counts as use: a hit marks the session most
+// recently used; an idle-expired session is removed and misses.
+func (h *hydroRegistry) touch(sessionID string, now time.Time, idle time.Duration) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	_, ok := h.sessions[sessionID]
-	return ok
+	return h.touchSession(sessionID, now, idle) != nil
 }
 
 // randomToken returns a cryptographically random opaque token. Tokens carry
@@ -141,7 +263,7 @@ func randomToken() (string, error) {
 // minted — so an expired, evicted, or attacker-chosen value gets a fresh ID
 // instead of becoming a registry key.
 func (a *App) ensureSession(w http.ResponseWriter, r *http.Request) (string, error) {
-	if ck, err := r.Cookie(sessionCookieName); err == nil && ck.Value != "" && a.hydro.has(ck.Value) {
+	if ck, err := r.Cookie(sessionCookieName); err == nil && ck.Value != "" && a.hydro.touch(ck.Value, a.now(), a.limits.SessionIdleTimeout) {
 		return ck.Value, nil
 	}
 	id, err := randomToken()
@@ -243,8 +365,21 @@ func (a *App) serveHydroEvent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	// The body is bounded before it is read: a declared oversize is refused
+	// outright, and MaxBytesReader stops a lying or chunked sender at the
+	// cap mid-decode (D20).
+	if r.ContentLength > a.limits.MaxEventBytes {
+		http.Error(w, "event payload too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, a.limits.MaxEventBytes)
 	var ev hydroEvent
 	if err := json.NewDecoder(r.Body).Decode(&ev); err != nil {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			http.Error(w, "event payload too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "malformed event payload", http.StatusBadRequest)
 		return
 	}
@@ -256,11 +391,11 @@ func (a *App) serveHydroEvent(w http.ResponseWriter, r *http.Request) {
 	// CSRF comes before anything the event names: a request that cannot
 	// prove it originated from a page this server rendered for this session
 	// learns nothing about tokens or actions (D15).
-	if !validCSRF(a.csrfSecret, ev.CSRFToken, ck.Value, time.Now()) {
+	if !validCSRF(a.csrfSecret, ev.CSRFToken, ck.Value, a.now()) {
 		http.Error(w, "invalid csrf token", http.StatusForbidden)
 		return
 	}
-	st := a.hydro.get(ck.Value, ev.HydroID)
+	st, sess := a.hydro.get(ck.Value, ev.HydroID, a.now(), a.limits.SessionIdleTimeout)
 	if st == nil {
 		http.NotFound(w, r)
 		return
@@ -281,7 +416,7 @@ func (a *App) serveHydroEvent(w http.ResponseWriter, r *http.Request) {
 		})}
 	}
 
-	st.mu.Lock()
+	sess.dispatch.Lock()
 	st.inst.Method(act.idx).Call(args)
 	env := Envelope{Redirect: reply.redirect}
 	var renderErr error
@@ -291,7 +426,7 @@ func (a *App) serveHydroEvent(w http.ResponseWriter, r *http.Request) {
 		renderErr = st.rt.tmpl.Execute(&buf, st.inst.Interface())
 		env.Patch = buf.String()
 	}
-	st.mu.Unlock()
+	sess.dispatch.Unlock()
 	if renderErr != nil {
 		a.logger.Error("rendering event patch", "action", ev.Action, "error", renderErr)
 		http.Error(w, "internal error", http.StatusInternalServerError)
