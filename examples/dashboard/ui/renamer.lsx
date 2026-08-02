@@ -1,0 +1,9 @@
+<section [hydroId] id="renamer" class="card">
+  <h2>Board name</h2>
+  <p id="board-name">{{ Name }}</p>
+  <form (submit)="Rename">
+    <label for="new-name">New name</label>
+    <input id="new-name" name="name" autocomplete="off">
+    <button id="save">Save</button>
+  </form>
+</section>

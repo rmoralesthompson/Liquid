@@ -1,0 +1,5 @@
+<section [hydroId] id="counter" class="card">
+  <h2>Counter</h2>
+  <p><span id="count">{{ Count }}</span> clicks</p>
+  <button id="increment" (click)="Increment">+1</button>
+</section>

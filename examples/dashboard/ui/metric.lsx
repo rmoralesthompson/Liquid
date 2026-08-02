@@ -1,0 +1,4 @@
+<section [hydroId] id="metric" class="card" aria-live="polite">
+  <h2>Requests per second</h2>
+  <p><span id="reading">{{ Reading }}</span> req/s</p>
+</section>

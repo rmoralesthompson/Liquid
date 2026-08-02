@@ -1,0 +1,13 @@
+<main class="dashboard">
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem auto; max-width: 40rem; }
+    .card { border: 1px solid #ccc; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+    .card h2 { margin-top: 0; font-size: 1rem; }
+  </style>
+  <h1>Liquid example dashboard</h1>
+  <app-counter></app-counter>
+  <app-metric [reading]="CurrentRate"></app-metric>
+  <app-stat-card [label]="StatLabel" [value]="StatValue"></app-stat-card>
+  <app-renamer [name]="BoardName"></app-renamer>
+  <p><a href="/admin?key=letmein">Admin area</a> (guarded — drop the key to get bounced)</p>
+</main>
