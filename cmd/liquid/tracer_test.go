@@ -50,7 +50,7 @@ func TestBuildThenServeRendersTheFixtureEndToEnd(t *testing.T) {
 	dir := t.TempDir()
 	copyFixtureDir(t, filepath.Join("internal", "compiler", "testdata", "hello"), dir)
 
-	if err := run([]string{"build", dir}); err != nil {
+	if err := run([]string{"build", dir}, io.Discard); err != nil {
 		t.Fatalf("liquid build: %v", err)
 	}
 

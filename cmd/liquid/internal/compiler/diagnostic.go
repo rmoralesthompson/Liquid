@@ -1,0 +1,43 @@
+package compiler
+
+// Severity classifies how serious a Diagnostic is.
+type Severity string
+
+// The two diagnostic severities defined by D13.
+const (
+	SeverityError   Severity = "error"
+	SeverityWarning Severity = "warning"
+)
+
+// Code is a stable machine-matchable diagnostic identifier (D13). Codes are
+// part of the agent-facing contract: renaming one is a breaking change.
+type Code string
+
+// The diagnostic codes liquid build and liquid vet can emit.
+const (
+	// CodeMalformedTemplate reports .lsx syntax the compiler cannot parse,
+	// such as an interpolation opened with {{ and never closed.
+	CodeMalformedTemplate Code = "LSX001"
+	// CodeMissingPairedSource reports a .lsx file with no paired .go source
+	// file next to it.
+	CodeMissingPairedSource Code = "LSX002"
+	// CodeMissingPairedStruct reports a paired .go file that does not define
+	// the struct the filename convention requires.
+	CodeMissingPairedStruct Code = "LSX003"
+	// CodeUnknownReference reports a template expression referencing a field
+	// or method that does not exist on the paired struct.
+	CodeUnknownReference Code = "LSX004"
+)
+
+// Diagnostic is one structured compiler finding: the literal contract an
+// agent parses to self-repair (D13), so the field set and JSON names are the
+// API. Line and Col are 1-based; Col counts bytes.
+type Diagnostic struct {
+	File       string   `json:"file"`
+	Line       int      `json:"line"`
+	Col        int      `json:"col"`
+	Severity   Severity `json:"severity"`
+	Code       Code     `json:"code"`
+	Message    string   `json:"message"`
+	Suggestion string   `json:"suggestion"`
+}
