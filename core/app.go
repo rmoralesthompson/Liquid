@@ -21,6 +21,7 @@ type App struct {
 	routes   []*route
 	services []reflect.Value // Provide'd singletons, in registration order
 	static   http.Handler    // file server mounted at /static/, nil until Static
+	hydro    hydroRegistry   // live interactive instances (D15)
 }
 
 type route struct {
@@ -28,8 +29,10 @@ type route struct {
 	prototype    reflect.Value // pointer to the registered component struct
 	tmpl         *template.Template
 	guards       []Guard
-	injections   []injection // dependencies resolved at registration (D8)
-	fallbackHead Head        // shell head for components without HeadProvider
+	injections   []injection    // dependencies resolved at registration (D8)
+	fallbackHead Head           // shell head for components without HeadProvider
+	hydroField   int            // index of the HydroID field; -1 when not interactive
+	actions      map[string]int // allowlisted action → method index, resolved at registration (D10)
 }
 
 // RouteOption configures one route at registration.
@@ -156,6 +159,10 @@ func (a *App) Route(path string, c Component, opts ...RouteOption) error {
 	if err != nil {
 		return fmt.Errorf("registering route %s: %w", path, err)
 	}
+	actions, err := resolveActions(v)
+	if err != nil {
+		return fmt.Errorf("registering route %s: %w", path, err)
+	}
 
 	tmpl, err := template.New(c.Selector()).Parse(c.Template())
 	if err != nil {
@@ -168,6 +175,8 @@ func (a *App) Route(path string, c Component, opts ...RouteOption) error {
 		tmpl:         tmpl,
 		injections:   injections,
 		fallbackHead: Head{Title: c.Selector()},
+		hydroField:   hydroIDField(v.Elem().Type()),
+		actions:      actions,
 	}
 	for _, opt := range opts {
 		opt(rt)
@@ -273,8 +282,16 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.errorPage(w)
 	}()
 
+	if r.URL.Path == hydroEventPath {
+		a.serveHydroEvent(w, r)
+		return
+	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if r.URL.Path == runtimeScriptPath {
+		a.serveRuntimeScript(w)
 		return
 	}
 	if a.static != nil && strings.HasPrefix(r.URL.Path, staticPrefix) {
@@ -344,6 +361,20 @@ func (a *App) renderRoute(w http.ResponseWriter, r *http.Request, rt *route, par
 	}
 	bindPathParams(inst.Elem(), params)
 
+	var sessionID, hydroID string
+	if rt.hydroField >= 0 {
+		var err error
+		if sessionID, err = a.ensureSession(w, r); err == nil {
+			hydroID, err = randomToken()
+		}
+		if err != nil {
+			a.logger.Error("establishing hydro session", "path", r.URL.Path, "error", err)
+			a.errorPage(w)
+			return
+		}
+		inst.Elem().Field(rt.hydroField).SetString(hydroID)
+	}
+
 	if init, ok := inst.Interface().(Initializer); ok {
 		if err := init.OnInit(ctx); err != nil {
 			a.logger.Error("initializing component", "path", r.URL.Path, "error", err)
@@ -357,6 +388,9 @@ func (a *App) renderRoute(w http.ResponseWriter, r *http.Request, rt *route, par
 		a.logger.Error("rendering component", "path", r.URL.Path, "error", err)
 		a.errorPage(w)
 		return
+	}
+	if rt.hydroField >= 0 {
+		a.hydro.put(sessionID, hydroID, &hydroState{inst: inst, rt: rt})
 	}
 
 	head := rt.fallbackHead

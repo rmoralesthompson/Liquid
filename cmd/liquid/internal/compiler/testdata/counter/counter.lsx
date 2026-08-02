@@ -1,0 +1,4 @@
+<div [hydroId] class="counter">
+  <span id="count">{{ Count }}</span>
+  <button (click)="Increment">+1</button>
+</div>
