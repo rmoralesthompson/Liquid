@@ -78,6 +78,8 @@ HTTP request
   → stream to ResponseWriter
 ```
 
+The fan-out step is `Ctx.Fanout(liquid.Load(&c.Field, fn, opts...)...)`: loaders run concurrently under the request context, `liquid.WithTimeout` bounds a single source (cooperatively — a loader that ignores its context is never killed), the first error cancels the siblings and takes the OnInit-error path, and `Fanout` returns only after every loader goroutine has exited so no write can race the render.
+
 ### Interactivity ("hydro" sessions)
 
 For interactive components:
