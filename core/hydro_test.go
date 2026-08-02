@@ -625,6 +625,10 @@ func TestRuntimeScriptIsServedAsAStaticFile(t *testing.T) {
 		// key on the compiled submit attribute, serialize the form, and send
 		// the shell's token with every event.
 		"data-liquid-submit", "csrfToken", `meta[name="liquid-csrf"]`, "FormData",
+		// The push half of the loop (D3/D20): the script must open the
+		// session's SSE stream, apply pushed patches by hydro id, and turn a
+		// reconnect into a full re-render of current state.
+		"EventSource", "/hydro-sse", "location.reload", "EventSource.CLOSED",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("runtime script missing %q", want)

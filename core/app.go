@@ -185,6 +185,10 @@ func (a *App) Route(path string, c Component, opts ...RouteOption) error {
 	if err != nil {
 		return fmt.Errorf("registering route %s: %w", path, err)
 	}
+	if _, ok := c.(SubscriptionProvider); ok && hydroIDField(v.Elem().Type()) < 0 {
+		return fmt.Errorf("registering route %s: component %s declares subscriptions but has no HydroID string field to push patches against",
+			path, v.Elem().Type().Name())
+	}
 
 	tmpl, err := template.New(c.Selector()).Parse(c.Template())
 	if err != nil {
@@ -309,6 +313,10 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.serveHydroEvent(w, r)
 		return
 	}
+	if r.URL.Path == hydroSSEPath {
+		a.serveHydroSSE(w, r)
+		return
+	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -337,6 +345,28 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.renderRoute(w, r, rt, params, ctx)
+}
+
+// registerHydro puts a rendered interactive instance in the session
+// registry and, for a SubscriptionProvider, activates its subject bindings:
+// the pump starts and its teardown is wired to the registry entry, so the
+// subscriptions live exactly as long as the entry (D20).
+func (a *App) registerHydro(sessionID, hydroID string, inst reflect.Value, rt *route) {
+	var subs []Subscription
+	if sp, ok := inst.Interface().(SubscriptionProvider); ok {
+		subs = sp.Subscriptions()
+	}
+	st := &hydroState{inst: inst, rt: rt, subs: subs}
+	sess := a.hydro.put(sessionID, hydroID, st, a.now(), a.limits)
+	if len(subs) == 0 {
+		return
+	}
+	stop, prime := a.startPump(sess, st, hydroID)
+	if !a.hydro.attachPump(sessionID, hydroID, stop, prime) {
+		// The entry was evicted in the window since put; no eviction path
+		// will ever run this stop, so it runs here.
+		stop()
+	}
 }
 
 // mintRenderTokens establishes one session-bound render's values: the
@@ -433,7 +463,7 @@ func (a *App) renderRoute(w http.ResponseWriter, r *http.Request, rt *route, par
 		return
 	}
 	if rt.hydroField >= 0 {
-		a.hydro.put(sessionID, hydroID, &hydroState{inst: inst, rt: rt}, a.now(), a.limits)
+		a.registerHydro(sessionID, hydroID, inst, rt)
 	}
 
 	head := rt.fallbackHead
