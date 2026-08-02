@@ -1,6 +1,8 @@
 # Liquid — Implementation Handoff
 
-**Date:** 2026-08-02 · **For:** a fresh session continuing implementation. **Frontier: [#6 — DI, `Head()`, `/static/`](https://github.com/rmoralesthompson/Liquid/issues/6) and [#7 — Hydro click loop + `liquidtest` MVP](https://github.com/rmoralesthompson/Liquid/issues/7)** (parallelizable; #8–#11 all wait on #7).
+**Date:** 2026-08-02 · **For:** a fresh session continuing implementation. **Frontier: [#7 — Hydro click loop + `liquidtest` MVP](https://github.com/rmoralesthompson/Liquid/issues/7)** (#8–#11 all wait on it; #12 on #10; #13 on #8/#9/#10).
+
+> **Workflow change since #5:** a repo hook now blocks pushing to `main` — work on a feature branch and open a PR (commit titles are hook-checked; the `Ticket #n:` / `Docs:` / `CI:` / `Chore:` prefixes in the log are the pattern).
 
 ## 1. What Liquid is (30 seconds)
 
@@ -10,7 +12,7 @@ A server-driven UI framework for Go: **Phoenix LiveView's runtime model + Angula
 
 **Design is closed** (24 decisions, D1–D24, all settled — full text in [design-decisions.md](design-decisions.md); don't re-litigate). **Planning is published to the tracker:** [issue #1](https://github.com/rmoralesthompson/Liquid/issues/1) is the v0.1 spec (PRD, incl. the agreed two-seam testing model); **#2–#13** are tracer-bullet tickets with GitHub-native blocking edges (each also carries a `Blocked by` text fallback — keep both in sync if the graph changes).
 
-**Tickets #2–#5 are done, reviewed, committed, closed** (#2: `59a759f`; #3: `f4cf165`; #4: `4cb664b`; #5: `0c91d9b`). Code that now exists:
+**Tickets #2–#6 are done, reviewed, committed, closed** (#2: `59a759f`; #3: `f4cf165`; #4: `4cb664b`; #5: `0c91d9b`; #6 via PR from `ticket-6-di-head-static`). Code that now exists:
 
 - `go.mod` — module `github.com/rmoralesthompson/liquid`, **`go 1.23.0`** (D24 floor — beware: `go get` likes to bump this; `golang.org/x/net` is pinned at `v0.38.0`, the last line compatible with 1.23).
 - `cmd/liquid/main.go` — CLI skeleton, `build` verb, thin `run(args)` wrapper.
@@ -19,28 +21,27 @@ A server-driven UI framework for Go: **Phoenix LiveView's runtime model + Angula
 - **Directives (#4):** `directives.go` — structural `*goIf`/`*goFor` compile to `{{if}}`/`{{range $x := …}}` via node-tree rewrites (control text inserted as RawNodes, never re-scanned); a raw-source directive scanner (in-tag state machine: skips comments/quoted values/prose, handles quoted/unquoted/valueless attrs, whitespace around `=`) supplies diagnostic positions. New codes: LSX005 malformed directive expression · LSX006 two structural directives on one element · LSX007 type-broken paired package (translated from `packages.Package.Errors` — `vet.go` now loads with `NeedSyntax|NeedTypesInfo` so type errors carry file:line:col). Directive expressions feed the LSX004 vet cross-check. Case-insensitive directive spelling is deliberate (recorded on #4). Quality deferrals (dispatch table, unify `scan.go` onto `cursor`) recorded on #7.
 - `core/` — package `liquid`: `Component` interface (`Selector()`/`Template()`); `App` with `New(opts...)` (`WithLogger` for pluggable slog), `Route(path, c, opts...)` (template parsed **once, at registration**; prototype validated — non-nil reference-typed fields rejected; `pathParam` tags validated: exported string fields only in v0.1), `ServeHTTP` (GET/HEAD only, fresh prototype copy per request, buffered render).
 - **Routing & lifecycle (#5):** `:param` segments bind via `pathParam` tags before `OnInit`; matching is on the **escaped** path with per-segment decode (`%2F` stays one segment), empty segments never match, one trailing slash tolerated, literal-beats-param at first differing position (registration order breaks exact ties). `guard.go`: `WithGuard` + `Allow`/`Deny` (403)/`Redirect` (302, D19), run **before instantiation**. `ctx.go`: `liquid.Ctx` embeds the request `context.Context`, accessors `Param`/`Query`/`Header` (D18). `Initializer` (`OnInit(ctx Ctx) error`); error → logged + clean framework error page (`errorPageHTML`); panics recovered to the same page, `http.ErrAbortHandler` re-panicked. Deferrals: Ctx test constructor → #7 · session accessor → #8 · dev-mode error page → #12.
-- Tests: 35 across 3 packages, all `-race` green — compiler seam (fixture → generated output; generated text executes as `html/template`), runtime seam (`httptest`: render, escaping, 404, 405, registration-time template errors, injected-logger 500 path, concurrency), and an **end-to-end tracer** (`cmd/liquid/tracer_test.go`: real `run(["build", dir])` → serve the generated template → assert HTML).
+- **DI, head, static (#6):** `inject.go` — `App.Provide` registers singletons by type; component fields tagged `inject:""` resolve at `Route` registration (concrete + interface matching; hard error on missing/ambiguous/typed-nil/unexported — never a nil field at request time, D8) and are copied into each fresh instance before param binding and `OnInit`. Dependency declaration is tag-based — a deliberate deviation from D8's any-matching-field wording, recorded with rationale on #6; `ProvideAs` (interface-keyed registration) deferred there too. `head.go` — every page renders inside a document shell (parsed once at package load); `HeadProvider` (`Head() liquid.Head`, title + meta, escaped, runs after `OnInit`) controls it, fallback title is the selector. `static.go` — `App.Static(dir)` mounts a stdlib file server at `/static/`; dir must exist at registration; `Cache-Control: public, max-age=3600` on hits only (a cached 404 would outlive the deploy that adds the file).
+- Tests: 60 across 3 packages, all `-race` green — compiler seam (fixture → generated output; generated text executes as `html/template`), runtime seam (`httptest`: render, escaping, 404, 405, registration-time template errors, injected-logger 500 path, concurrency), and an **end-to-end tracer** (`cmd/liquid/tracer_test.go`: real `run(["build", dir])` → serve the generated template → assert HTML).
 - CI (`.github/workflows/ci.yml`) activates on `go.mod` presence: golangci-lint (config is **`.golangci-lint.yml`** — nonstandard filename, passed via `--config`) + `go test -race`. Lint is strict: wrapcheck (wrap errors crossing package boundaries), revive `exported` (doc comments on all exported items).
 
 ## 3. How to work (the per-ticket pipeline)
 
-1. **Work the frontier**: open tickets with zero open blockers. After #5, the frontier is **#6 and #7** (parallelizable — #6 is DI/`Head()`/static, #7 is the hydro click loop + `liquidtest`; #8–#11 wait on #7, #12 on #10, #13 on #8/#9/#10). Claim by assigning: `gh issue edit <n> --add-assignee @me`.
+1. **Work the frontier**: open tickets with zero open blockers. After #6, the frontier is **#7 alone** (the hydro click loop + `liquidtest`; #8–#11 wait on #7, #12 on #10, #13 on #8/#9/#10). Claim by assigning: `gh issue edit <n> --add-assignee @me`.
 2. Per ticket: `/tdd` → `/code-review` (dual-axis: Standards vs CLAUDE.md + smells; Spec vs the ticket's acceptance criteria — fetch with `gh issue view <n> --comments`, comments included) → fix findings → commit (`Closes #<n>`) → push.
 3. Testing seams are **pre-agreed** (recorded in #1) — don't renegotiate: (1) the `liquid` CLI/compiler boundary: fixtures in → generated code + diagnostics out; (2) the HTTP runtime seam (later wrapped by `liquidtest`, ticket #7). Red before green; report pins (green-on-write tests) honestly.
 4. Defer out-of-scope review findings by commenting them onto the owning ticket, not by expanding the slice.
 5. Commands: `go build ./...` · `go test -v -race ./...` · `gofmt -l .` · `go vet ./...` · `golangci-lint run`.
 
-## 4. The frontier tickets specifically
+## 4. The frontier ticket specifically
 
-**[#6 — DI, `Head()`, `/static/`](https://github.com/rmoralesthompson/Liquid/issues/6)** (core-side): D8 (minimal reflection injector — hard error on unresolvable deps, never a nil field) and D22 (optional `Head()` interface, `/static/` via stdlib file server). HTTP seam.
-
-**[#7 — Hydro click loop + `liquidtest` MVP](https://github.com/rmoralesthompson/Liquid/issues/7)**: the big one — first interactive slice: `(click)` bindings, compile-time **action allowlist** (D10/D11 — never `MethodByName`), hydro session registry (opaque random tokens), patch-or-redirect envelope (D19), `liquidtest` package. **Three deferrals already live in its comments** (directive-dispatch table + `cursor` unification in the compiler; `Ctx` test constructor). Spans compiler + core.
+**[#7 — Hydro click loop + `liquidtest` MVP](https://github.com/rmoralesthompson/Liquid/issues/7)**: the big one — first interactive slice: `(click)` bindings, compile-time **action allowlist** (D10/D11 — never `MethodByName`), hydro session registry (opaque random tokens), patch-or-redirect envelope (D19), `liquidtest` package. **Three deferrals already live in its comments** (directive-dispatch table + `cursor` unification in the compiler; `Ctx` test constructor). Spans compiler + core. Note for the patch envelope: since #6, every page render is wrapped in the document shell (`core/head.go`) — patches must carry the component render, not the shell.
 
 ## 5. Reading order for a fresh context
 
 1. This file.
 2. `gh issue view <frontier-ticket> --comments` — the ticket + any deferred findings.
-3. [design-decisions.md](design-decisions.md) — for #6: D8, D22; for #7: D2, D10, D11, D14, D15, D19, D20.
-4. The code: `core/` (`app.go`, `ctx.go`, `guard.go`, `component.go` + `app_test.go` — the pattern to extend); compiler side for #7: `cmd/liquid/internal/compiler/` (`compiler.go`, `scan.go`, `directives.go`, `vet.go`, `diagnostic.go` + tests).
+3. [design-decisions.md](design-decisions.md) — for #7: D2, D10, D11, D14, D15, D19, D20.
+4. The code: `core/` (`app.go`, `ctx.go`, `guard.go`, `component.go`, `inject.go`, `head.go`, `static.go` + `app_test.go`/`di_test.go` — the pattern to extend); compiler side for #7: `cmd/liquid/internal/compiler/` (`compiler.go`, `scan.go`, `directives.go`, `vet.go`, `diagnostic.go` + tests).
 5. [architecture.md](architecture.md) §Templates + §Agentic pipeline; [CLAUDE.md](../CLAUDE.md) invariants.
 6. [REPORT.md](REPORT.md) §4 and `docs/source/` — only for the "why" behind invariants; treat all source-doc code as untrusted.
