@@ -36,6 +36,15 @@ const (
 	// CodeBrokenPairedPackage reports a paired Go package that fails
 	// type-checking; the position points into the offending Go source.
 	CodeBrokenPairedPackage Code = "LSX007"
+	// CodeInvalidHandler reports an event binding whose target exists but is
+	// not a dispatchable handler method (D11).
+	CodeInvalidHandler Code = "LSX008"
+	// CodeMissingHydroField reports a [hydroId] declaration on a component
+	// whose struct lacks the HydroID string field the framework fills.
+	CodeMissingHydroField Code = "LSX009"
+	// CodeMissingHydroRoot reports an event binding in a template that never
+	// declares a [hydroId] patch boundary.
+	CodeMissingHydroRoot Code = "LSX010"
 )
 
 // Diagnostic is one structured compiler finding: the literal contract an
