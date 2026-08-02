@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Git pre-push hook: refuses any push that updates main on the remote.
+#
+# Activate once per clone:
+#   git config core.hooksPath .githooks
+#
+# Deliberate override (e.g. release manager): git push --no-verify
+set -euo pipefail
+
+protected="refs/heads/main"
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  if [ "$remote_ref" = "$protected" ]; then
+    echo "pre-push: refusing to push to '$protected'." >&2
+    echo "          Push a feature branch and open a PR instead." >&2
+    echo "          Deliberate override: git push --no-verify" >&2
+    exit 1
+  fi
+done
+
+exit 0
