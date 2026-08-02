@@ -1,0 +1,5 @@
+<div [hydroId]>
+  <form (submit)="Rename">
+    <button>Save</button>
+  </form>
+</div>

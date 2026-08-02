@@ -19,17 +19,31 @@ const (
 	// refHydroRoot is a [hydroId] declaration, which requires the struct to
 	// carry the HydroID string field the framework fills.
 	refHydroRoot
+	// refCSRFRoot is a <form> element, which requires the struct to carry
+	// the CSRFToken string field the framework fills (D15).
+	refCSRFRoot
 )
 
-// interpolation is one struct reference found in raw .lsx source — a
-// {{ ... }} token or a directive/binding expression — positioned at the first
-// byte of its expression (1-based line, 1-based byte column) so a diagnostic
-// points at the identifier an agent should edit, not at the braces.
-type interpolation struct {
-	expr string
+// pos is a position in raw .lsx source: 1-based line, 1-based byte column,
+// pointing at what the author typed so diagnostics land on it exactly.
+type pos struct {
 	line int
 	col  int
+}
+
+// structRef is one reference a template makes against the paired struct —
+// a {{ ... }} interpolation, a directive/binding expression, or a tag-level
+// field requirement ([hydroId], <form>) — positioned at the first byte of
+// its expression so a diagnostic points at the identifier an agent should
+// edit, not at the braces.
+type structRef struct {
+	expr string
+	pos
 	kind refKind
+	// binding is the canonical spelling of the event binding a refAction
+	// came from — (click), (submit) — so diagnostics name what the author
+	// typed.
+	binding string
 }
 
 // scanInterpolations walks raw .lsx source for {{ ... }} tokens, recording
@@ -37,8 +51,8 @@ type interpolation struct {
 // original source text, before HTML parsing, so diagnostics point at what the
 // author actually typed. An opening {{ with no matching }} yields an LSX001
 // diagnostic and ends the scan, since everything after it is ambiguous.
-func scanInterpolations(file string, src []byte) ([]interpolation, []Diagnostic) {
-	var interps []interpolation
+func scanInterpolations(file string, src []byte) ([]structRef, []Diagnostic) {
+	var interps []structRef
 	c := &cursor{src: src, line: 1, col: 1}
 	for !c.done() {
 		if !c.hasPrefix("{{") {
@@ -64,10 +78,9 @@ func scanInterpolations(file string, src []byte) ([]interpolation, []Diagnostic)
 		// skipSpace cannot overrun the closing braces: } is not whitespace.
 		c.advance(2)
 		c.skipSpace()
-		interps = append(interps, interpolation{
+		interps = append(interps, structRef{
 			expr: strings.TrimSpace(expr),
-			line: c.line,
-			col:  c.col,
+			pos:  pos{line: c.line, col: c.col},
 		})
 		c.advance(end - c.i)
 	}

@@ -1,0 +1,7 @@
+<div [hydroId]>
+  <h2 id="title">{{ Title }}</h2>
+  <form (submit)="Rename">
+    <input name="title">
+    <button>Save</button>
+  </form>
+</div>

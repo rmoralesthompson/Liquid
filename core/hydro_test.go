@@ -39,6 +39,19 @@ func (c *counter) Actions() []string { return []string{"Increment"} }
 
 var hydroIDPattern = regexp.MustCompile(`data-hydro-id="([A-Za-z0-9_-]+)"`)
 
+var csrfPattern = regexp.MustCompile(`<meta name="liquid-csrf" content="([^"]+)">`)
+
+// csrfToken extracts the liquid-csrf meta token from rendered HTML, failing
+// the test when none is present.
+func csrfToken(t *testing.T, body string) string {
+	t.Helper()
+	m := csrfPattern.FindStringSubmatch(body)
+	if m == nil {
+		t.Fatalf("no liquid-csrf meta token in body: %q", body)
+	}
+	return m[1]
+}
+
 // hydroID extracts the data-hydro-id token from rendered HTML, failing the
 // test when none is present.
 func hydroID(t *testing.T, body string) string {
@@ -115,30 +128,38 @@ type envelope struct {
 	Redirect string `json:"redirect"`
 }
 
-// renderInteractive GETs path and returns the session ID and hydro token the
-// render established.
-func renderInteractive(t *testing.T, srv *httptest.Server, path string) (sessionID, token string) {
+// liveSession is what one interactive render establishes: the session
+// cookie value, the hydro token, and the CSRF token.
+type liveSession struct {
+	id    string
+	hydro string
+	csrf  string
+}
+
+// renderInteractive GETs path and returns the session the render established.
+func renderInteractive(t *testing.T, srv *httptest.Server, path string) liveSession {
 	t.Helper()
 	resp, body := get(t, srv.URL+path)
 	ck := sessionCookie(resp)
 	if ck == nil {
 		t.Fatal("interactive render set no liquid_session cookie")
 	}
-	return ck.Value, hydroID(t, body)
+	return liveSession{id: ck.Value, hydro: hydroID(t, body), csrf: csrfToken(t, body)}
 }
 
-// fire POSTs a hydro event under the given session, returning the response
+// fire POSTs a hydro event as the given session, returning the response
 // status and decoded envelope.
-func fire(t *testing.T, srv *httptest.Server, sessionID, token, action string) (int, envelope) {
+func fire(t *testing.T, srv *httptest.Server, sess liveSession, action string) (int, envelope) {
 	t.Helper()
-	payload := fmt.Sprintf(`{"hydroId":%q,"action":%q}`, token, action)
+	sessionID := sess.id
+	payload := fmt.Sprintf(`{"hydroId":%q,"action":%q,"csrfToken":%q}`, sess.hydro, action, sess.csrf)
 	req, err := http.NewRequest(http.MethodPost, srv.URL+"/hydro-event", strings.NewReader(payload))
 	if err != nil {
 		t.Fatalf("building event request: %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if sessionID != "" {
-		req.AddCookie(&http.Cookie{Name: "liquid_session", Value: sessionID})
+		req.AddCookie(&http.Cookie{Name: "liquid_session", Value: sess.id})
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -160,9 +181,9 @@ func fire(t *testing.T, srv *httptest.Server, sessionID, token, action string) (
 
 func TestClickDispatchMutatesLiveStateAndReturnsComponentPatch(t *testing.T) {
 	srv := newServer(t, "/", &counter{})
-	sessionID, token := renderInteractive(t, srv, "/")
+	sess := renderInteractive(t, srv, "/")
 
-	status, env := fire(t, srv, sessionID, token, "Increment")
+	status, env := fire(t, srv, sess, "Increment")
 
 	if status != http.StatusOK {
 		t.Fatalf("status = %d, want %d", status, http.StatusOK)
@@ -170,7 +191,7 @@ func TestClickDispatchMutatesLiveStateAndReturnsComponentPatch(t *testing.T) {
 	if want := `<span id="count">1</span>`; !strings.Contains(env.Patch, want) {
 		t.Errorf("patch = %q, want it to contain %q", env.Patch, want)
 	}
-	if !strings.Contains(env.Patch, fmt.Sprintf("data-hydro-id=%q", token)) {
+	if !strings.Contains(env.Patch, fmt.Sprintf("data-hydro-id=%q", sess.hydro)) {
 		t.Errorf("patch = %q, want it rooted at the same hydro token", env.Patch)
 	}
 	if strings.Contains(env.Patch, "<!doctype") || strings.Contains(env.Patch, "<html") {
@@ -178,18 +199,18 @@ func TestClickDispatchMutatesLiveStateAndReturnsComponentPatch(t *testing.T) {
 	}
 
 	// A second event hits the same live instance: state accumulates.
-	if _, env = fire(t, srv, sessionID, token, "Increment"); !strings.Contains(env.Patch, `<span id="count">2</span>`) {
+	if _, env = fire(t, srv, sess, "Increment"); !strings.Contains(env.Patch, `<span id="count">2</span>`) {
 		t.Errorf("second patch = %q, want the live instance to keep counting", env.Patch)
 	}
 }
 
 func TestActionOutsideAllowlistIs404EvenWhenTheMethodExists(t *testing.T) {
 	srv := newServer(t, "/", &counter{})
-	sessionID, token := renderInteractive(t, srv, "/")
+	sess := renderInteractive(t, srv, "/")
 
 	// Sneaky is a real exported method on counter, but no template binding
 	// references it, so it is not in Actions() — dispatch must refuse it.
-	status, _ := fire(t, srv, sessionID, token, "Sneaky")
+	status, _ := fire(t, srv, sess, "Sneaky")
 
 	if status != http.StatusNotFound {
 		t.Errorf("status = %d, want %d: dispatch must consult the compiled allowlist, never the method set", status, http.StatusNotFound)
@@ -198,25 +219,29 @@ func TestActionOutsideAllowlistIs404EvenWhenTheMethodExists(t *testing.T) {
 
 func TestUnknownHydroTokenOrMissingSessionIs404(t *testing.T) {
 	srv := newServer(t, "/", &counter{})
-	sessionID, token := renderInteractive(t, srv, "/")
+	sess := renderInteractive(t, srv, "/")
 
-	if status, _ := fire(t, srv, sessionID, "not-a-real-token", "Increment"); status != http.StatusNotFound {
+	badToken := sess
+	badToken.hydro = "not-a-real-token"
+	if status, _ := fire(t, srv, badToken, "Increment"); status != http.StatusNotFound {
 		t.Errorf("unknown hydro token: status = %d, want %d", status, http.StatusNotFound)
 	}
-	if status, _ := fire(t, srv, "", token, "Increment"); status != http.StatusNotFound {
+	noCookie := sess
+	noCookie.id = ""
+	if status, _ := fire(t, srv, noCookie, "Increment"); status != http.StatusNotFound {
 		t.Errorf("missing session cookie: status = %d, want %d", status, http.StatusNotFound)
 	}
 }
 
 func TestMalformedEventBodyIs400(t *testing.T) {
 	srv := newServer(t, "/", &counter{})
-	sessionID, _ := renderInteractive(t, srv, "/")
+	sess := renderInteractive(t, srv, "/")
 
 	req, err := http.NewRequest(http.MethodPost, srv.URL+"/hydro-event", strings.NewReader("not json"))
 	if err != nil {
 		t.Fatalf("building event request: %v", err)
 	}
-	req.AddCookie(&http.Cookie{Name: "liquid_session", Value: sessionID})
+	req.AddCookie(&http.Cookie{Name: "liquid_session", Value: sess.id})
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("POST /hydro-event: %v", err)
@@ -253,7 +278,7 @@ func TestFabricatedSessionCookieIsNotAdopted(t *testing.T) {
 
 func TestPerSessionRegistryIsBoundedByEvictingOldestEntries(t *testing.T) {
 	srv := newServer(t, "/", &counter{})
-	sessionID, oldest := renderInteractive(t, srv, "/")
+	sess := renderInteractive(t, srv, "/")
 
 	// Fill the session past its cap; the oldest entry must fall out while
 	// the newest keeps working (64 is the per-session cap).
@@ -263,7 +288,7 @@ func TestPerSessionRegistryIsBoundedByEvictingOldestEntries(t *testing.T) {
 		if err != nil {
 			t.Fatalf("building request: %v", err)
 		}
-		req.AddCookie(&http.Cookie{Name: "liquid_session", Value: sessionID})
+		req.AddCookie(&http.Cookie{Name: "liquid_session", Value: sess.id})
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("GET: %v", err)
@@ -276,17 +301,20 @@ func TestPerSessionRegistryIsBoundedByEvictingOldestEntries(t *testing.T) {
 		newest = hydroID(t, string(body))
 	}
 
-	if status, _ := fire(t, srv, sessionID, oldest, "Increment"); status != http.StatusNotFound {
+	evicted := sess
+	if status, _ := fire(t, srv, evicted, "Increment"); status != http.StatusNotFound {
 		t.Errorf("evicted entry: status = %d, want %d", status, http.StatusNotFound)
 	}
-	if status, _ := fire(t, srv, sessionID, newest, "Increment"); status != http.StatusOK {
+	newestSess := sess
+	newestSess.hydro = newest
+	if status, _ := fire(t, srv, newestSess, "Increment"); status != http.StatusOK {
 		t.Errorf("newest entry: status = %d, want %d", status, http.StatusOK)
 	}
 }
 
 func TestGlobalSessionRegistryIsBoundedByEvictingOldestSessions(t *testing.T) {
 	srv := newServer(t, "/", &counter{})
-	firstSession, firstToken := renderInteractive(t, srv, "/")
+	first := renderInteractive(t, srv, "/")
 
 	// Mint sessions past the global cap (1024); the first session must be
 	// evicted wholesale.
@@ -297,7 +325,7 @@ func TestGlobalSessionRegistryIsBoundedByEvictingOldestSessions(t *testing.T) {
 		}
 	}
 
-	if status, _ := fire(t, srv, firstSession, firstToken, "Increment"); status != http.StatusNotFound {
+	if status, _ := fire(t, srv, first, "Increment"); status != http.StatusNotFound {
 		t.Errorf("evicted session: status = %d, want %d", status, http.StatusNotFound)
 	}
 }
@@ -313,7 +341,13 @@ func TestRuntimeScriptIsServedAsAStaticFile(t *testing.T) {
 	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/javascript") {
 		t.Errorf("Content-Type = %q, want text/javascript", ct)
 	}
-	for _, want := range []string{"data-liquid-action", "/hydro-event", "data-hydro-id"} {
+	for _, want := range []string{
+		"data-liquid-action", "/hydro-event", "data-hydro-id",
+		// The submit and CSRF halves of the loop (D12/D15): the script must
+		// key on the compiled submit attribute, serialize the form, and send
+		// the shell's token with every event.
+		"data-liquid-submit", "csrfToken", `meta[name="liquid-csrf"]`, "FormData",
+	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("runtime script missing %q", want)
 		}

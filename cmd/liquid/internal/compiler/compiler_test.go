@@ -17,23 +17,14 @@ import (
 )
 
 // copyFixture copies a testdata fixture project into a temp dir so Build can
-// write generated files without touching the repo.
+// write generated files without touching the repo. The copy is recursive:
+// fixtures using liquid.Event carry a local liquidstub module their go.mod
+// replace points at.
 func copyFixture(t *testing.T, name string) string {
 	t.Helper()
 	dst := t.TempDir()
-	src := filepath.Join("testdata", name)
-	entries, err := os.ReadDir(src)
-	if err != nil {
-		t.Fatalf("reading fixture %s: %v", name, err)
-	}
-	for _, e := range entries {
-		data, err := os.ReadFile(filepath.Join(src, e.Name()))
-		if err != nil {
-			t.Fatalf("reading fixture file %s: %v", e.Name(), err)
-		}
-		if err := os.WriteFile(filepath.Join(dst, e.Name()), data, 0o644); err != nil {
-			t.Fatalf("copying fixture file %s: %v", e.Name(), err)
-		}
+	if err := os.CopyFS(dst, os.DirFS(filepath.Join("testdata", name))); err != nil {
+		t.Fatalf("copying fixture %s: %v", name, err)
 	}
 	return dst
 }

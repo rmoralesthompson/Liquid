@@ -12,6 +12,9 @@ type Ctx struct {
 	context.Context
 	params map[string]string
 	req    *http.Request
+	// session is the liquid_session ID minted during this render, set when
+	// the browser has no cookie yet for the request to carry.
+	session string
 }
 
 // NewCtx assembles a Ctx from a request and bound route params. The
@@ -32,3 +35,17 @@ func (c Ctx) Query(name string) string { return c.req.URL.Query().Get(name) }
 
 // Header returns the named request header.
 func (c Ctx) Header(name string) string { return c.req.Header.Get(name) }
+
+// Session returns the opaque liquid_session ID the request runs under (D15,
+// D18), or "" for a session-less request. On the very first render of an
+// interactive page the ID was minted mid-request, so it comes from the
+// framework rather than the not-yet-set cookie.
+func (c Ctx) Session() string {
+	if c.session != "" {
+		return c.session
+	}
+	if ck, err := c.req.Cookie(sessionCookieName); err == nil {
+		return ck.Value
+	}
+	return ""
+}

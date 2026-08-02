@@ -2,6 +2,7 @@ package liquid
 
 import (
 	"bytes"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"html/template"
@@ -10,6 +11,7 @@ import (
 	"net/url"
 	"reflect"
 	"strings"
+	"time"
 )
 
 // App routes HTTP requests to components. Component templates are parsed
@@ -17,11 +19,12 @@ import (
 // registered instances act only as prototypes and are never shared mutable
 // state across requests.
 type App struct {
-	logger   *slog.Logger
-	routes   []*route
-	services []reflect.Value // Provide'd singletons, in registration order
-	static   http.Handler    // file server mounted at /static/, nil until Static
-	hydro    hydroRegistry   // live interactive instances (D15)
+	logger     *slog.Logger
+	routes     []*route
+	services   []reflect.Value // Provide'd singletons, in registration order
+	static     http.Handler    // file server mounted at /static/, nil until Static
+	hydro      hydroRegistry   // live interactive instances (D15)
+	csrfSecret []byte          // HMAC key for CSRF tokens, minted per process (D15)
 }
 
 type route struct {
@@ -29,10 +32,11 @@ type route struct {
 	prototype    reflect.Value // pointer to the registered component struct
 	tmpl         *template.Template
 	guards       []Guard
-	injections   []injection    // dependencies resolved at registration (D8)
-	fallbackHead Head           // shell head for components without HeadProvider
-	hydroField   int            // index of the HydroID field; -1 when not interactive
-	actions      map[string]int // allowlisted action → method index, resolved at registration (D10)
+	injections   []injection       // dependencies resolved at registration (D8)
+	fallbackHead Head              // shell head for components without HeadProvider
+	hydroField   int               // index of the HydroID field; -1 when not interactive
+	csrfField    int               // index of the CSRFToken field; -1 when the component has none
+	actions      map[string]action // allowlisted action → dispatch shape, resolved at registration (D10)
 }
 
 // RouteOption configures one route at registration.
@@ -123,8 +127,15 @@ func WithLogger(l *slog.Logger) Option {
 
 // New creates an App, applying any options.
 func New(opts ...Option) *App {
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		// No entropy at construction is unrecoverable and must not fall
+		// through to serving unsigned tokens.
+		panic(fmt.Sprintf("liquid: generating CSRF secret: %v", err))
+	}
 	a := &App{
-		logger: slog.Default(),
+		logger:     slog.Default(),
+		csrfSecret: secret,
 	}
 	for _, opt := range opts {
 		opt(a)
@@ -176,6 +187,7 @@ func (a *App) Route(path string, c Component, opts ...RouteOption) error {
 		injections:   injections,
 		fallbackHead: Head{Title: c.Selector()},
 		hydroField:   hydroIDField(v.Elem().Type()),
+		csrfField:    csrfTokenField(v.Elem().Type()),
 		actions:      actions,
 	}
 	for _, opt := range opts {
@@ -316,6 +328,19 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	a.renderRoute(w, r, rt, params, ctx)
 }
 
+// mintRenderTokens establishes one session-bound render's values: the
+// session ID, a fresh hydro token when the component is interactive, and
+// the render's CSRF token (D15).
+func (a *App) mintRenderTokens(w http.ResponseWriter, r *http.Request, rt *route) (sessionID, hydroID, csrf string, err error) {
+	if sessionID, err = a.ensureSession(w, r); err == nil && rt.hydroField >= 0 {
+		hydroID, err = randomToken()
+	}
+	if err != nil {
+		return "", "", "", err
+	}
+	return sessionID, hydroID, mintCSRF(a.csrfSecret, sessionID, time.Now()), nil
+}
+
 // matchRoute returns the most specific registered route matching the path
 // segments, with its bound params, or nil when nothing matches.
 func (a *App) matchRoute(segs []string) (*route, map[string]string) {
@@ -361,18 +386,25 @@ func (a *App) renderRoute(w http.ResponseWriter, r *http.Request, rt *route, par
 	}
 	bindPathParams(inst.Elem(), params)
 
-	var sessionID, hydroID string
-	if rt.hydroField >= 0 {
+	// A component is session-bound when it has hydro state to register or a
+	// CSRF token to carry; either way the render mints the session, a fresh
+	// CSRF token for the runtime's event payloads (D15), and — for hydro
+	// components — the patch-boundary token.
+	var sessionID, hydroID, csrf string
+	if rt.hydroField >= 0 || rt.csrfField >= 0 {
 		var err error
-		if sessionID, err = a.ensureSession(w, r); err == nil {
-			hydroID, err = randomToken()
-		}
-		if err != nil {
+		if sessionID, hydroID, csrf, err = a.mintRenderTokens(w, r, rt); err != nil {
 			a.logger.Error("establishing hydro session", "path", r.URL.Path, "error", err)
 			a.errorPage(w)
 			return
 		}
+		ctx.session = sessionID
+	}
+	if rt.hydroField >= 0 {
 		inst.Elem().Field(rt.hydroField).SetString(hydroID)
+	}
+	if rt.csrfField >= 0 {
+		inst.Elem().Field(rt.csrfField).SetString(csrf)
 	}
 
 	if init, ok := inst.Interface().(Initializer); ok {
@@ -398,7 +430,7 @@ func (a *App) renderRoute(w http.ResponseWriter, r *http.Request, rt *route, par
 		head = hp.Head()
 	}
 	var page bytes.Buffer
-	if err := shellTmpl.Execute(&page, shellData{Head: head, Body: template.HTML(buf.String())}); err != nil {
+	if err := shellTmpl.Execute(&page, shellData{Head: head, CSRF: csrf, Body: template.HTML(buf.String())}); err != nil {
 		a.logger.Error("rendering document shell", "path", r.URL.Path, "error", err)
 		a.errorPage(w)
 		return

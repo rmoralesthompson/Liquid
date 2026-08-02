@@ -73,8 +73,8 @@ func TestBuildReportsClickHandlerWithWrongSignature(t *testing.T) {
 		Col:        20,
 		Severity:   compiler.SeverityError,
 		Code:       "LSX008",
-		Message:    "(click) handler Increment has signature func(n int); a v0.1 click handler takes no arguments and returns nothing",
-		Suggestion: "change the method to func (c *Badsig) Increment()",
+		Message:    "(click) handler Increment has signature func(n int); a handler is func() or func(e liquid.Event) (D11)",
+		Suggestion: "change the method to func (c *Badsig) Increment() or func (c *Badsig) Increment(e liquid.Event)",
 	}}
 	if !reflect.DeepEqual(diags, want) {
 		t.Errorf("diagnostics = %+v, want %+v", diags, want)
@@ -82,6 +82,29 @@ func TestBuildReportsClickHandlerWithWrongSignature(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(dir, "badsig_gen.go")); !os.IsNotExist(err) {
 		t.Errorf("badsig_gen.go must not be written for an invalid handler (stat err: %v)", err)
+	}
+}
+
+func TestBuildReportsEventHandlerWithResultAsInvalid(t *testing.T) {
+	dir := copyFixture(t, "badevent")
+
+	diags := build(t, dir)
+
+	want := []compiler.Diagnostic{{
+		File:       filepath.Join(dir, "badevent.lsx"),
+		Line:       2,
+		Col:        19,
+		Severity:   compiler.SeverityError,
+		Code:       "LSX008",
+		Message:    "(submit) handler Rename has signature func(e liquid.Event) error; a handler is func() or func(e liquid.Event) (D11)",
+		Suggestion: "change the method to func (c *Badevent) Rename() or func (c *Badevent) Rename(e liquid.Event)",
+	}}
+	if !reflect.DeepEqual(diags, want) {
+		t.Errorf("diagnostics = %+v, want %+v", diags, want)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "badevent_gen.go")); !os.IsNotExist(err) {
+		t.Errorf("badevent_gen.go must not be written for an invalid handler (stat err: %v)", err)
 	}
 }
 
@@ -128,6 +151,105 @@ func TestBuildReportsClickBindingWithoutHydroIdRoot(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(dir, "strayclick_gen.go")); !os.IsNotExist(err) {
 		t.Errorf("strayclick_gen.go must not be written without a patch root (stat err: %v)", err)
+	}
+}
+
+func TestSubmitBindingCompilesToSubmitAttributeAndAllowlist(t *testing.T) {
+	dir := copyFixture(t, "renamer")
+
+	if diags := build(t, dir); len(diags) != 0 {
+		t.Fatalf("unexpected diagnostics: %+v", diags)
+	}
+
+	generated, err := os.ReadFile(filepath.Join(dir, "renamer_gen.go"))
+	if err != nil {
+		t.Fatalf("expected renamer_gen.go beside the source: %v", err)
+	}
+	got := string(generated)
+
+	if want := `data-liquid-submit=\"Rename\"`; !strings.Contains(got, want) {
+		t.Errorf("generated template missing %q\n--- generated ---\n%s", want, got)
+	}
+	if strings.Contains(got, "(submit)") {
+		t.Errorf("(submit) binding must not survive into the generated template\n--- generated ---\n%s", got)
+	}
+	for _, want := range []string{
+		"func (c *Renamer) Actions() []string",
+		`"Rename"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("generated allowlist missing %q\n--- generated ---\n%s", want, got)
+		}
+	}
+}
+
+func TestFormReceivesAutoInjectedCSRFTokenInput(t *testing.T) {
+	dir := copyFixture(t, "renamer")
+
+	if diags := build(t, dir); len(diags) != 0 {
+		t.Fatalf("unexpected diagnostics: %+v", diags)
+	}
+
+	tmplText := generatedTemplateText(t, filepath.Join(dir, "renamer_gen.go"))
+
+	type data struct {
+		HydroID   string
+		CSRFToken string
+		Title     string
+	}
+	got := execute(t, tmplText, data{HydroID: "tok", CSRFToken: "sess:99:sig", Title: "Ops"})
+	want := `<input type="hidden" name="csrf_token" value="sess:99:sig"/>`
+	if !strings.Contains(got, want) {
+		t.Errorf("rendered form missing auto-injected CSRF input %q\n--- rendered ---\n%s", want, got)
+	}
+	if formEnd := strings.Index(got, "</form>"); formEnd < 0 || strings.Index(got, want) > formEnd {
+		t.Errorf("CSRF input must render inside the form\n--- rendered ---\n%s", got)
+	}
+}
+
+func TestBuildReportsFormWithoutCSRFTokenField(t *testing.T) {
+	dir := copyFixture(t, "nocsrf")
+
+	diags := build(t, dir)
+
+	want := []compiler.Diagnostic{{
+		File:       filepath.Join(dir, "nocsrf.lsx"),
+		Line:       2,
+		Col:        3,
+		Severity:   compiler.SeverityError,
+		Code:       "LSX011",
+		Message:    "Nocsrf has a <form> but no CSRFToken string field for the framework to fill",
+		Suggestion: "add CSRFToken string to the Nocsrf struct",
+	}}
+	if !reflect.DeepEqual(diags, want) {
+		t.Errorf("diagnostics = %+v, want %+v", diags, want)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "nocsrf_gen.go")); !os.IsNotExist(err) {
+		t.Errorf("nocsrf_gen.go must not be written without CSRF plumbing (stat err: %v)", err)
+	}
+}
+
+func TestBuildReportsSubmitBindingWithoutHydroIdRoot(t *testing.T) {
+	dir := copyFixture(t, "straysubmit")
+
+	diags := build(t, dir)
+
+	want := []compiler.Diagnostic{{
+		File:       filepath.Join(dir, "straysubmit.lsx"),
+		Line:       2,
+		Col:        9,
+		Severity:   compiler.SeverityError,
+		Code:       "LSX010",
+		Message:    "(submit) needs a patch boundary, but no element in straysubmit.lsx declares [hydroId]",
+		Suggestion: "add [hydroId] to the component's root element",
+	}}
+	if !reflect.DeepEqual(diags, want) {
+		t.Errorf("diagnostics = %+v, want %+v", diags, want)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "straysubmit_gen.go")); !os.IsNotExist(err) {
+		t.Errorf("straysubmit_gen.go must not be written without a patch root (stat err: %v)", err)
 	}
 }
 
