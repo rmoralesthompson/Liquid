@@ -13,6 +13,12 @@ import (
 	liquid "github.com/rmoralesthompson/liquid/core"
 )
 
+// helloWorldHTML is hello's rendered output for Name "world".
+const helloWorldHTML = "<h1>Hello, world!</h1>"
+
+// neverRenderedHTML marks templates that a failing lifecycle must not reach.
+const neverRenderedHTML = "<p>never rendered</p>"
+
 type hello struct {
 	Name string
 }
@@ -57,7 +63,7 @@ func TestRouteRendersComponentAsHTML(t *testing.T) {
 	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
 		t.Errorf("Content-Type = %q, want text/html", ct)
 	}
-	if want := "<h1>Hello, world!</h1>"; !strings.Contains(body, want) {
+	if want := helloWorldHTML; !strings.Contains(body, want) {
 		t.Errorf("body = %q, want it to contain %q", body, want)
 	}
 }
@@ -213,7 +219,7 @@ func TestAllowingGuardLetsTheRenderThrough(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
 	}
-	if want := "<h1>Hello, world!</h1>"; !strings.Contains(body, want) {
+	if want := helloWorldHTML; !strings.Contains(body, want) {
 		t.Errorf("body = %q, want it to contain %q", body, want)
 	}
 }
@@ -271,7 +277,7 @@ type failingInit struct{}
 
 func (f *failingInit) Selector() string { return "app-failing" }
 
-func (f *failingInit) Template() string { return "<p>never rendered</p>" }
+func (f *failingInit) Template() string { return neverRenderedHTML }
 
 func (f *failingInit) OnInit(ctx liquid.Ctx) error {
 	return fmt.Errorf("db down")
@@ -309,7 +315,7 @@ type panicky struct{}
 
 func (p *panicky) Selector() string { return "app-panicky" }
 
-func (p *panicky) Template() string { return "<p>never rendered</p>" }
+func (p *panicky) Template() string { return neverRenderedHTML }
 
 func (p *panicky) OnInit(ctx liquid.Ctx) error { panic("boom") }
 
@@ -337,7 +343,7 @@ func TestPanicInOnInitIsRecoveredTo500AndProcessStaysAlive(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("after a recovered panic, status = %d, want %d", resp.StatusCode, http.StatusOK)
 	}
-	if want := "<h1>Hello, world!</h1>"; !strings.Contains(body, want) {
+	if want := helloWorldHTML; !strings.Contains(body, want) {
 		t.Errorf("after a recovered panic, body = %q, want it to contain %q", body, want)
 	}
 }
@@ -434,7 +440,7 @@ type aborting struct{}
 
 func (a *aborting) Selector() string { return "app-aborting" }
 
-func (a *aborting) Template() string { return "<p>never rendered</p>" }
+func (a *aborting) Template() string { return neverRenderedHTML }
 
 func (a *aborting) OnInit(ctx liquid.Ctx) error { panic(http.ErrAbortHandler) }
 
@@ -448,7 +454,7 @@ func TestErrAbortHandlerPanicIsNotConvertedToAnErrorPage(t *testing.T) {
 
 	resp, err := http.Get(srv.URL + "/")
 	if err == nil {
-		resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		t.Fatalf("status = %d; want the net/http abort sentinel to sever the connection, not produce a response", resp.StatusCode)
 	}
 }
@@ -487,7 +493,7 @@ func TestConcurrentRequestsEachRenderAFreshInstance(t *testing.T) {
 				errs <- err
 				return
 			}
-			if !strings.Contains(string(body), "<h1>Hello, world!</h1>") {
+			if !strings.Contains(string(body), helloWorldHTML) {
 				errs <- fmt.Errorf("unexpected body: %q", body)
 				return
 			}

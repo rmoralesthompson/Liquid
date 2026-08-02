@@ -267,23 +267,39 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	var rt *route
-	var params map[string]string
-	for _, cand := range a.routes {
-		p, ok := cand.match(segs)
-		if !ok {
-			continue
-		}
-		if rt == nil || moreSpecific(cand.pattern, rt.pattern) {
-			rt, params = cand, p
-		}
-	}
+	rt, params := a.matchRoute(segs)
 	if rt == nil {
 		http.NotFound(w, r)
 		return
 	}
 
 	ctx := Ctx{Context: r.Context(), params: params, req: r}
+	if !a.runGuards(w, r, rt, ctx) {
+		return
+	}
+	a.renderRoute(w, r, rt, params, ctx)
+}
+
+// matchRoute returns the most specific registered route matching the path
+// segments, with its bound params, or nil when nothing matches.
+func (a *App) matchRoute(segs []string) (*route, map[string]string) {
+	var best *route
+	var params map[string]string
+	for _, cand := range a.routes {
+		p, ok := cand.match(segs)
+		if !ok {
+			continue
+		}
+		if best == nil || moreSpecific(cand.pattern, best.pattern) {
+			best, params = cand, p
+		}
+	}
+	return best, params
+}
+
+// runGuards runs the route's guards in order. On the first non-allow verdict
+// it writes the blocking response and returns false.
+func (a *App) runGuards(w http.ResponseWriter, r *http.Request, rt *route, ctx Ctx) bool {
 	for _, g := range rt.guards {
 		res := g(ctx)
 		if res.allowed {
@@ -291,12 +307,17 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if res.redirectTo != "" {
 			http.Redirect(w, r, res.redirectTo, http.StatusFound)
-			return
+			return false
 		}
 		http.Error(w, "forbidden", http.StatusForbidden)
-		return
+		return false
 	}
+	return true
+}
 
+// renderRoute runs the component lifecycle on a fresh instance — param
+// binding, OnInit, buffered render — and writes the result.
+func (a *App) renderRoute(w http.ResponseWriter, r *http.Request, rt *route, params map[string]string, ctx Ctx) {
 	inst := reflect.New(rt.prototype.Elem().Type())
 	inst.Elem().Set(rt.prototype.Elem())
 	bindPathParams(inst.Elem(), params)
