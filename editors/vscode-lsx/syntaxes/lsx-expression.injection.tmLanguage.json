@@ -1,0 +1,49 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "LSX interpolation injection",
+  "scopeName": "lsx.expression.injection",
+  "injectionSelector": "L:text.html.lsx -comment -source",
+  "patterns": [
+    {
+      "include": "#template-expression"
+    }
+  ],
+  "repository": {
+    "template-expression": {
+      "name": "meta.template.expression.lsx",
+      "begin": "\\{\\{",
+      "end": "\\}\\}",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.template-expression.begin.lsx"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.template-expression.end.lsx"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#expression-content"
+        }
+      ]
+    },
+    "expression-content": {
+      "patterns": [
+        {
+          "match": "\\$[A-Za-z_][A-Za-z0-9_]*",
+          "name": "variable.other.loop.lsx"
+        },
+        {
+          "match": "\\.",
+          "name": "punctuation.accessor.lsx"
+        },
+        {
+          "match": "[A-Za-z_][A-Za-z0-9_]*",
+          "name": "variable.other.member.lsx"
+        }
+      ]
+    }
+  }
+}

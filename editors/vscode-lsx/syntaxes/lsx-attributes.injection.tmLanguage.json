@@ -1,0 +1,213 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "LSX binding-attribute injection",
+  "scopeName": "lsx.attributes.injection",
+  "injectionSelector": "L:text.html.lsx meta.tag -string -comment",
+  "patterns": [
+    {
+      "include": "#structural-directive"
+    },
+    {
+      "include": "#event-binding"
+    },
+    {
+      "include": "#marker-binding"
+    }
+  ],
+  "repository": {
+    "structural-directive": {
+      "patterns": [
+        {
+          "begin": "(?<=\\s)(\\*[A-Za-z][A-Za-z0-9_]*)\\s*(=)\\s*([\"'])",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.control.directive.structural.lsx"
+            },
+            "2": {
+              "name": "punctuation.separator.key-value.lsx"
+            },
+            "3": {
+              "name": "punctuation.definition.string.begin.lsx"
+            }
+          },
+          "end": "\\3",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.lsx"
+            }
+          },
+          "contentName": "meta.directive.expression.lsx",
+          "patterns": [
+            {
+              "include": "#directive-expression"
+            }
+          ]
+        },
+        {
+          "match": "(?<=\\s)(\\*[A-Za-z][A-Za-z0-9_]*)\\s*(=)\\s*([^\\s\"'/>]+)",
+          "captures": {
+            "1": {
+              "name": "keyword.control.directive.structural.lsx"
+            },
+            "2": {
+              "name": "punctuation.separator.key-value.lsx"
+            },
+            "3": {
+              "name": "meta.directive.expression.lsx",
+              "patterns": [
+                {
+                  "include": "#directive-expression"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "match": "(?<=\\s)\\*[A-Za-z][A-Za-z0-9_]*",
+          "name": "keyword.control.directive.structural.lsx"
+        }
+      ]
+    },
+    "event-binding": {
+      "patterns": [
+        {
+          "begin": "(?<=\\s)(\\()([A-Za-z][A-Za-z0-9_]*)(\\))\\s*(=)\\s*([\"'])",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.definition.event.begin.lsx"
+            },
+            "2": {
+              "name": "support.type.event.lsx"
+            },
+            "3": {
+              "name": "punctuation.definition.event.end.lsx"
+            },
+            "4": {
+              "name": "punctuation.separator.key-value.lsx"
+            },
+            "5": {
+              "name": "punctuation.definition.string.begin.lsx"
+            }
+          },
+          "end": "\\5",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.lsx"
+            }
+          },
+          "contentName": "meta.event.handler.lsx",
+          "patterns": [
+            {
+              "match": "[A-Za-z_][A-Za-z0-9_]*",
+              "name": "entity.name.function.handler.lsx"
+            }
+          ]
+        },
+        {
+          "match": "(?<=\\s)(\\()([A-Za-z][A-Za-z0-9_]*)(\\))\\s*(=)\\s*([^\\s\"'/>]+)",
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.event.begin.lsx"
+            },
+            "2": {
+              "name": "support.type.event.lsx"
+            },
+            "3": {
+              "name": "punctuation.definition.event.end.lsx"
+            },
+            "4": {
+              "name": "punctuation.separator.key-value.lsx"
+            },
+            "5": {
+              "name": "entity.name.function.handler.lsx"
+            }
+          }
+        },
+        {
+          "match": "(?<=\\s)(\\()([A-Za-z][A-Za-z0-9_]*)(\\))",
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.event.begin.lsx"
+            },
+            "2": {
+              "name": "support.type.event.lsx"
+            },
+            "3": {
+              "name": "punctuation.definition.event.end.lsx"
+            }
+          }
+        }
+      ]
+    },
+    "marker-binding": {
+      "patterns": [
+        {
+          "begin": "(?<=\\s)(\\[)([A-Za-z][A-Za-z0-9_]*)(\\])\\s*(=)\\s*([\"'])",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.definition.binding.begin.lsx"
+            },
+            "2": {
+              "name": "support.type.binding.lsx"
+            },
+            "3": {
+              "name": "punctuation.definition.binding.end.lsx"
+            },
+            "4": {
+              "name": "punctuation.separator.key-value.lsx"
+            },
+            "5": {
+              "name": "punctuation.definition.string.begin.lsx"
+            }
+          },
+          "end": "\\5",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.lsx"
+            }
+          },
+          "contentName": "meta.binding.expression.lsx",
+          "patterns": [
+            {
+              "include": "#directive-expression"
+            }
+          ]
+        },
+        {
+          "match": "(?<=\\s)(\\[)([A-Za-z][A-Za-z0-9_]*)(\\])",
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.binding.begin.lsx"
+            },
+            "2": {
+              "name": "support.type.binding.lsx"
+            },
+            "3": {
+              "name": "punctuation.definition.binding.end.lsx"
+            }
+          }
+        }
+      ]
+    },
+    "directive-expression": {
+      "patterns": [
+        {
+          "match": "\\b(let|of)\\b",
+          "name": "keyword.control.lsx"
+        },
+        {
+          "match": "\\$[A-Za-z_][A-Za-z0-9_]*",
+          "name": "variable.other.loop.lsx"
+        },
+        {
+          "match": "\\.",
+          "name": "punctuation.accessor.lsx"
+        },
+        {
+          "match": "[A-Za-z_][A-Za-z0-9_]*",
+          "name": "variable.other.member.lsx"
+        }
+      ]
+    }
+  }
+}

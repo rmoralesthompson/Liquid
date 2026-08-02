@@ -1,0 +1,15 @@
+<!-- demo.lsx — every construct the grammar highlights, for eyeballing. -->
+<div [hydroId] class="card" aria-live="polite">
+  <h2 title="{{ Name }}">{{ Name }} — {{ Form.Value }}</h2>
+  <div *goIf="IsActive" class="status-ok">● Active</div>
+  <ul>
+    <li *goFor="let log of RecentLogs">{{ $log }}</li>
+  </ul>
+  <span id="count">{{ Count }}</span>
+  <button (click)="TriggerReboot">Emergency Reset</button>
+  <form>
+    <input id="rename" type="text" value="{{ Title }}">
+    <button (submit)="Rename">Save</button>
+  </form>
+  <p>Braces in prose need no escaping unless doubled, and *goIf outside a tag is plain text.</p>
+</div>
