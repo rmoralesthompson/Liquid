@@ -17,15 +17,19 @@ import (
 // registered instances act only as prototypes and are never shared mutable
 // state across requests.
 type App struct {
-	logger *slog.Logger
-	routes []*route
+	logger   *slog.Logger
+	routes   []*route
+	services []reflect.Value // Provide'd singletons, in registration order
+	static   http.Handler    // file server mounted at /static/, nil until Static
 }
 
 type route struct {
-	pattern   []string      // path segments; a ":name" segment binds a param
-	prototype reflect.Value // pointer to the registered component struct
-	tmpl      *template.Template
-	guards    []Guard
+	pattern      []string      // path segments; a ":name" segment binds a param
+	prototype    reflect.Value // pointer to the registered component struct
+	tmpl         *template.Template
+	guards       []Guard
+	injections   []injection // dependencies resolved at registration (D8)
+	fallbackHead Head        // shell head for components without HeadProvider
 }
 
 // RouteOption configures one route at registration.
@@ -148,12 +152,23 @@ func (a *App) Route(path string, c Component, opts ...RouteOption) error {
 		return fmt.Errorf("registering route %s: %w", path, err)
 	}
 
+	injections, err := a.resolveInjections(v.Elem().Type())
+	if err != nil {
+		return fmt.Errorf("registering route %s: %w", path, err)
+	}
+
 	tmpl, err := template.New(c.Selector()).Parse(c.Template())
 	if err != nil {
 		return fmt.Errorf("parsing template for %s: %w", c.Selector(), err)
 	}
 
-	rt := &route{pattern: splitPath(path), prototype: v, tmpl: tmpl}
+	rt := &route{
+		pattern:      splitPath(path),
+		prototype:    v,
+		tmpl:         tmpl,
+		injections:   injections,
+		fallbackHead: Head{Title: c.Selector()},
+	}
 	for _, opt := range opts {
 		opt(rt)
 	}
@@ -262,6 +277,10 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if a.static != nil && strings.HasPrefix(r.URL.Path, staticPrefix) {
+		a.static.ServeHTTP(cacheOnSuccess{w}, r)
+		return
+	}
 	segs, ok := splitRequestPath(r.URL.EscapedPath())
 	if !ok {
 		http.NotFound(w, r)
@@ -320,6 +339,9 @@ func (a *App) runGuards(w http.ResponseWriter, r *http.Request, rt *route, ctx C
 func (a *App) renderRoute(w http.ResponseWriter, r *http.Request, rt *route, params map[string]string, ctx Ctx) {
 	inst := reflect.New(rt.prototype.Elem().Type())
 	inst.Elem().Set(rt.prototype.Elem())
+	for _, inj := range rt.injections {
+		inst.Elem().Field(inj.field).Set(inj.svc)
+	}
 	bindPathParams(inst.Elem(), params)
 
 	if init, ok := inst.Interface().(Initializer); ok {
@@ -337,8 +359,19 @@ func (a *App) renderRoute(w http.ResponseWriter, r *http.Request, rt *route, par
 		return
 	}
 
+	head := rt.fallbackHead
+	if hp, ok := inst.Interface().(HeadProvider); ok {
+		head = hp.Head()
+	}
+	var page bytes.Buffer
+	if err := shellTmpl.Execute(&page, shellData{Head: head, Body: template.HTML(buf.String())}); err != nil {
+		a.logger.Error("rendering document shell", "path", r.URL.Path, "error", err)
+		a.errorPage(w)
+		return
+	}
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if _, err := buf.WriteTo(w); err != nil {
+	if _, err := page.WriteTo(w); err != nil {
 		a.logger.Error("writing response", "path", r.URL.Path, "error", err)
 	}
 }
