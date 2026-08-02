@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"go/types"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -22,8 +23,13 @@ const maxSuggestionDistance = 2
 func vetReferences(ctx context.Context, dir, lsxPath, structName string, interps []interpolation) ([]Diagnostic, error) {
 	cfg := &packages.Config{
 		Context: ctx,
-		Mode:    packages.NeedName | packages.NeedTypes,
-		Dir:     dir,
+		// NeedSyntax and NeedTypesInfo make packages type-check from source
+		// in-process, so type errors carry file:line:col positions instead
+		// of arriving as one opaque driver error.
+		Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles |
+			packages.NeedImports | packages.NeedDeps | packages.NeedTypes |
+			packages.NeedSyntax | packages.NeedTypesInfo,
+		Dir: dir,
 	}
 	pkgs, err := packages.Load(cfg, ".")
 	if err != nil {
@@ -34,7 +40,7 @@ func vetReferences(ctx context.Context, dir, lsxPath, structName string, interps
 	}
 	pkg := pkgs[0]
 	if len(pkg.Errors) > 0 {
-		return nil, fmt.Errorf("type-checking package in %s: %v", dir, pkg.Errors[0])
+		return brokenPackageDiags(lsxPath, pkg.Errors), nil
 	}
 
 	base := filepath.Base(lsxPath)
@@ -78,6 +84,60 @@ func vetReferences(ctx context.Context, dir, lsxPath, structName string, interps
 		})
 	}
 	return diags, nil
+}
+
+// brokenPackageDiags translates go/types errors from the paired package into
+// D13 diagnostics, keeping the agent-facing contract structured even when
+// the Go half of a component does not compile. Errors without a usable
+// position fall back to the template file at 1:1.
+func brokenPackageDiags(lsxPath string, errs []packages.Error) []Diagnostic {
+	var diags []Diagnostic
+	for _, e := range errs {
+		file, line, col := parsePos(e.Pos)
+		if file == "" {
+			file, line, col = lsxPath, 1, 1
+		}
+		diags = append(diags, Diagnostic{
+			File:       file,
+			Line:       line,
+			Col:        col,
+			Severity:   SeverityError,
+			Code:       CodeBrokenPairedPackage,
+			Message:    e.Msg,
+			Suggestion: "fix the Go type errors in the paired package, then rerun liquid build",
+		})
+	}
+	return diags
+}
+
+// parsePos splits a packages.Error position ("file:line:col", "file:line",
+// "file", "-", or "") into its parts, defaulting line and col to 1.
+func parsePos(pos string) (file string, line, col int) {
+	if pos == "" || pos == "-" {
+		return "", 1, 1
+	}
+	file, line, col = pos, 1, 1
+	rest, last, ok := cutLastInt(file)
+	if !ok {
+		return file, line, col
+	}
+	if rest2, second, ok := cutLastInt(rest); ok {
+		return rest2, second, last
+	}
+	return rest, last, 1
+}
+
+// cutLastInt splits a trailing ":<number>" off s.
+func cutLastInt(s string) (rest string, n int, ok bool) {
+	i := strings.LastIndex(s, ":")
+	if i < 0 {
+		return s, 0, false
+	}
+	n, err := strconv.Atoi(s[i+1:])
+	if err != nil {
+		return s, 0, false
+	}
+	return s[:i], n, true
 }
 
 // isSimpleIdent reports whether s is a plain Go identifier.

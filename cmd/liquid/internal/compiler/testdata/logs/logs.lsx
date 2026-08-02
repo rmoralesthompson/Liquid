@@ -1,0 +1,1 @@
+<ul><li *goFor="let entry of Entries">{{ $entry }}</li></ul>

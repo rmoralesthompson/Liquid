@@ -1,0 +1,1 @@
+<div *goIf="IsAdmin" class="badge">Administrator</div>

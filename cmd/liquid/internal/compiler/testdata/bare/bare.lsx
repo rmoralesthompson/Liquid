@@ -1,0 +1,1 @@
+<div *goIf=IsActve>on</div>

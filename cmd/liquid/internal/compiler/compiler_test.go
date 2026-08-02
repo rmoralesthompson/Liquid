@@ -141,6 +141,170 @@ func TestBuildReportsMissingPairedStructAsDiagnostic(t *testing.T) {
 	}
 }
 
+func TestBuildReportsMalformedGoForExpressionWithPosition(t *testing.T) {
+	dir := copyFixture(t, "badfor")
+
+	diags := build(t, dir)
+
+	want := []compiler.Diagnostic{{
+		File:       filepath.Join(dir, "badfor.lsx"),
+		Line:       2,
+		Col:        15,
+		Severity:   compiler.SeverityError,
+		Code:       "LSX005",
+		Message:    `malformed *goFor expression "Entries": want "let <var> of <FieldPath>"`,
+		Suggestion: `write *goFor="let item of Entries"`,
+	}}
+	if !reflect.DeepEqual(diags, want) {
+		t.Errorf("diagnostics = %+v, want %+v", diags, want)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "badfor_gen.go")); !os.IsNotExist(err) {
+		t.Errorf("badfor_gen.go must not be written for a malformed directive (stat err: %v)", err)
+	}
+}
+
+func TestBuildReportsMalformedGoIfExpressionWithPosition(t *testing.T) {
+	dir := copyFixture(t, "badif")
+
+	diags := build(t, dir)
+
+	want := []compiler.Diagnostic{{
+		File:       filepath.Join(dir, "badif.lsx"),
+		Line:       1,
+		Col:        17,
+		Severity:   compiler.SeverityError,
+		Code:       "LSX005",
+		Message:    `malformed *goIf expression "": want a field path such as "IsActive"`,
+		Suggestion: `bind *goIf to a boolean field or method on the component struct`,
+	}}
+	if !reflect.DeepEqual(diags, want) {
+		t.Errorf("diagnostics = %+v, want %+v", diags, want)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "badif_gen.go")); !os.IsNotExist(err) {
+		t.Errorf("badif_gen.go must not be written for a malformed directive (stat err: %v)", err)
+	}
+}
+
+func TestBuildReportsTwoStructuralDirectivesOnOneElement(t *testing.T) {
+	dir := copyFixture(t, "double")
+
+	diags := build(t, dir)
+
+	want := []compiler.Diagnostic{{
+		File:       filepath.Join(dir, "double.lsx"),
+		Line:       1,
+		Col:        26,
+		Severity:   compiler.SeverityError,
+		Code:       "LSX006",
+		Message:    "conflicting structural directives: *goFor cannot share an element with *goIf",
+		Suggestion: "move one directive to a wrapping element; an element takes at most one structural directive",
+	}}
+	if !reflect.DeepEqual(diags, want) {
+		t.Errorf("diagnostics = %+v, want %+v", diags, want)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "double_gen.go")); !os.IsNotExist(err) {
+		t.Errorf("double_gen.go must not be written for conflicting directives (stat err: %v)", err)
+	}
+}
+
+func TestBuildReportsUnknownFieldInDirectiveExpression(t *testing.T) {
+	dir := copyFixture(t, "dirtypo")
+
+	diags := build(t, dir)
+
+	want := []compiler.Diagnostic{{
+		File:       filepath.Join(dir, "dirtypo.lsx"),
+		Line:       1,
+		Col:        13,
+		Severity:   compiler.SeverityError,
+		Code:       "LSX004",
+		Message:    "Dirtypo has no field or method named IsActve",
+		Suggestion: "did you mean IsActive?",
+	}}
+	if !reflect.DeepEqual(diags, want) {
+		t.Errorf("diagnostics = %+v, want %+v", diags, want)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "dirtypo_gen.go")); !os.IsNotExist(err) {
+		t.Errorf("dirtypo_gen.go must not be written when a directive reference fails vet (stat err: %v)", err)
+	}
+}
+
+func TestBuildReportsTypeBrokenPairedPackageAsDiagnostics(t *testing.T) {
+	dir := copyFixture(t, "brokengo")
+
+	diags := build(t, dir)
+
+	want := []compiler.Diagnostic{{
+		File:       filepath.Join(dir, "brokengo.go"),
+		Line:       8,
+		Col:        9,
+		Severity:   compiler.SeverityError,
+		Code:       "LSX007",
+		Message:    "undefined: undefinedSymbol",
+		Suggestion: "fix the Go type errors in the paired package, then rerun liquid build",
+	}}
+	if !reflect.DeepEqual(diags, want) {
+		t.Errorf("diagnostics = %+v, want %+v", diags, want)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "brokengo_gen.go")); !os.IsNotExist(err) {
+		t.Errorf("brokengo_gen.go must not be written for a type-broken package (stat err: %v)", err)
+	}
+}
+
+func TestBuildVetsUnquotedDirectiveValues(t *testing.T) {
+	dir := copyFixture(t, "bare")
+
+	diags := build(t, dir)
+
+	want := []compiler.Diagnostic{{
+		File:       filepath.Join(dir, "bare.lsx"),
+		Line:       1,
+		Col:        12,
+		Severity:   compiler.SeverityError,
+		Code:       "LSX004",
+		Message:    "Bare has no field or method named IsActve",
+		Suggestion: "did you mean IsActive?",
+	}}
+	if !reflect.DeepEqual(diags, want) {
+		t.Errorf("diagnostics = %+v, want %+v", diags, want)
+	}
+}
+
+func TestBuildReportsValuelessDirectiveAsMalformed(t *testing.T) {
+	dir := copyFixture(t, "novalue")
+
+	diags := build(t, dir)
+
+	want := []compiler.Diagnostic{{
+		File:       filepath.Join(dir, "novalue.lsx"),
+		Line:       1,
+		Col:        12,
+		Severity:   compiler.SeverityError,
+		Code:       "LSX005",
+		Message:    `malformed *goIf expression "": want a field path such as "IsActive"`,
+		Suggestion: "bind *goIf to a boolean field or method on the component struct",
+	}}
+	if !reflect.DeepEqual(diags, want) {
+		t.Errorf("diagnostics = %+v, want %+v", diags, want)
+	}
+}
+
+func TestBuildIgnoresDirectiveLookalikesInTextAndComments(t *testing.T) {
+	dir := copyFixture(t, "prose")
+
+	if diags := build(t, dir); len(diags) != 0 {
+		t.Errorf("prose and comments must not scan as directives, got %+v", diags)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "prose_gen.go")); err != nil {
+		t.Errorf("expected prose_gen.go for a clean template: %v", err)
+	}
+}
+
 func TestVetReportsDiagnosticsWithoutWritingFiles(t *testing.T) {
 	dir := copyFixture(t, "typo")
 
@@ -218,6 +382,54 @@ func TestGeneratedTemplateExecutesAsHTMLTemplate(t *testing.T) {
 	if got, want := b.String(), `<h1 title="world">Hello, world!</h1>`; got != want {
 		t.Errorf("rendered output = %q, want %q", got, want)
 	}
+}
+
+func TestGoIfRendersElementOnlyWhenConditionIsTrue(t *testing.T) {
+	dir := copyFixture(t, "badge")
+
+	if diags := build(t, dir); len(diags) != 0 {
+		t.Fatalf("unexpected diagnostics: %+v", diags)
+	}
+	tmplText := generatedTemplateText(t, filepath.Join(dir, "badge_gen.go"))
+
+	type data struct{ IsAdmin bool }
+	if got, want := execute(t, tmplText, data{IsAdmin: true}), `<div class="badge">Administrator</div>`; got != want {
+		t.Errorf("truthy render = %q, want %q", got, want)
+	}
+	if got, want := execute(t, tmplText, data{IsAdmin: false}), ""; got != want {
+		t.Errorf("falsy render = %q, want %q", got, want)
+	}
+}
+
+func TestGoForRendersOneElementPerItemWithLoopVariable(t *testing.T) {
+	dir := copyFixture(t, "logs")
+
+	if diags := build(t, dir); len(diags) != 0 {
+		t.Fatalf("unexpected diagnostics: %+v", diags)
+	}
+	tmplText := generatedTemplateText(t, filepath.Join(dir, "logs_gen.go"))
+
+	type data struct{ Entries []string }
+	if got, want := execute(t, tmplText, data{Entries: []string{"boot", "login"}}), `<ul><li>boot</li><li>login</li></ul>`; got != want {
+		t.Errorf("non-empty render = %q, want %q", got, want)
+	}
+	if got, want := execute(t, tmplText, data{}), `<ul></ul>`; got != want {
+		t.Errorf("empty render = %q, want %q", got, want)
+	}
+}
+
+// execute parses tmplText as html/template and renders it against data.
+func execute(t *testing.T, tmplText string, data any) string {
+	t.Helper()
+	tmpl, err := template.New("fixture").Parse(tmplText)
+	if err != nil {
+		t.Fatalf("generated text is not valid html/template: %v\n--- text ---\n%s", err, tmplText)
+	}
+	var b strings.Builder
+	if err := tmpl.Execute(&b, data); err != nil {
+		t.Fatalf("executing generated template: %v", err)
+	}
+	return b.String()
 }
 
 // generatedTemplateText extracts the string literal returned by the Template

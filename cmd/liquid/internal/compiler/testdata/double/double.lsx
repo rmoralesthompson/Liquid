@@ -1,0 +1,1 @@
+<li *goIf="Show" *goFor="let e of Entries">{{ $e }}</li>

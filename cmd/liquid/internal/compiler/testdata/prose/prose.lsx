@@ -1,0 +1,2 @@
+<!-- <b *goIf="Gone">hidden draft</b> -->
+<p title="a<b">Use *goIf="Name" in templates, {{ Name }}.</p>

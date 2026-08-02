@@ -100,6 +100,12 @@ func analyzeFile(ctx context.Context, lsxPath string) ([]Diagnostic, []byte, err
 		return diags, nil, nil
 	}
 
+	dirs := scanDirectives(src)
+	if diags := checkDirectives(lsxPath, dirs); len(diags) > 0 {
+		return diags, nil, nil
+	}
+	interps = append(interps, directiveRefs(dirs)...)
+
 	vetDiags, err := vetReferences(ctx, filepath.Dir(lsxPath), lsxPath, structName, interps)
 	if err != nil {
 		return nil, nil, fmt.Errorf("vetting: %w", err)
@@ -162,9 +168,22 @@ func compileLSX(src []byte) (string, error) {
 		return "", fmt.Errorf("parsing .lsx markup: %w", err)
 	}
 
-	var b strings.Builder
+	// Reparent the fragment nodes under a container so structural directives
+	// can insert control-flow siblings around any element, including
+	// top-level ones.
+	container := &html.Node{Type: html.ElementNode, Data: "body", DataAtom: atom.Body}
 	for _, n := range nodes {
-		transform(n)
+		if n.Parent != nil {
+			n.Parent.RemoveChild(n)
+		}
+		container.AppendChild(n)
+	}
+	if err := transform(container); err != nil {
+		return "", err
+	}
+
+	var b strings.Builder
+	for n := container.FirstChild; n != nil; n = n.NextSibling {
 		if err := html.Render(&b, n); err != nil {
 			return "", fmt.Errorf("rendering compiled template: %w", err)
 		}
@@ -173,21 +192,89 @@ func compileLSX(src []byte) (string, error) {
 }
 
 // transform rewrites Liquid template sugar on a parsed node and its children.
-func transform(n *html.Node) {
+func transform(n *html.Node) error {
 	if n.Type == html.TextNode {
 		n.Data = rewriteInterpolations(n.Data)
+	}
+	if n.Type == html.ElementNode {
+		if err := applyStructuralDirective(n); err != nil {
+			return err
+		}
 	}
 	for i := range n.Attr {
 		n.Attr[i].Val = rewriteInterpolations(n.Attr[i].Val)
 	}
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		transform(c)
+		if err := transform(c); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// applyStructuralDirective wraps an element carrying a structural directive
+// attribute in the html/template control block it compiles to (D1). The
+// parser has already lowercased attribute keys, so directives are matched in
+// that form. Inserted control nodes are RawNodes: they render verbatim and
+// are never re-visited as interpolation text.
+func applyStructuralDirective(n *html.Node) error {
+	for i, a := range n.Attr {
+		switch a.Key {
+		case "*goif":
+			n.Attr = append(n.Attr[:i], n.Attr[i+1:]...)
+			wrap(n, "{{if "+fieldRef(a.Val)+"}}", "{{end}}")
+			return nil
+		case "*gofor":
+			loopVar, list, ok := parseGoFor(a.Val)
+			if !ok {
+				// Diagnostics gate codegen, so a malformed expression here
+				// means the raw-source scan missed this attribute — fail
+				// loudly rather than ship the directive to the browser.
+				return fmt.Errorf("malformed *goFor expression %q escaped the diagnostic scan", a.Val)
+			}
+			n.Attr = append(n.Attr[:i], n.Attr[i+1:]...)
+			wrap(n, "{{range $"+loopVar+" := "+fieldRef(list)+"}}", "{{end}}")
+			return nil
+		}
+	}
+	return nil
+}
+
+// parseGoFor splits a *goFor expression against the grammar
+// "let <ident> of <FieldPath>", returning the loop variable name and the
+// list field path.
+func parseGoFor(expr string) (loopVar, list string, ok bool) {
+	parts := strings.Fields(expr)
+	if len(parts) != 4 || parts[0] != "let" || parts[2] != "of" {
+		return "", "", false
+	}
+	return parts[1], parts[3], true
+}
+
+// wrap inserts raw template text immediately before and after n.
+func wrap(n *html.Node, open, end string) {
+	n.Parent.InsertBefore(&html.Node{Type: html.RawNode, Data: open}, n)
+	if next := n.NextSibling; next != nil {
+		n.Parent.InsertBefore(&html.Node{Type: html.RawNode, Data: end}, next)
+	} else {
+		n.Parent.AppendChild(&html.Node{Type: html.RawNode, Data: end})
 	}
 }
 
+// fieldRef roots a template expression at the component struct: a bare field
+// path gains a leading dot; expressions already rooted (.Field) or naming a
+// loop variable ($var) pass through unchanged.
+func fieldRef(expr string) string {
+	expr = strings.TrimSpace(expr)
+	if expr == "" || strings.HasPrefix(expr, ".") || strings.HasPrefix(expr, "$") {
+		return expr
+	}
+	return "." + expr
+}
+
 // rewriteInterpolations turns each {{ Field }} occurrence into the
-// html/template form {{ .Field }}. Expressions already rooted at a dot are
-// left untouched.
+// html/template form {{ .Field }}. Expressions already rooted at a dot and
+// loop variables ($var) are left untouched.
 func rewriteInterpolations(s string) string {
 	var b strings.Builder
 	for {
@@ -204,10 +291,7 @@ func rewriteInterpolations(s string) string {
 		end += start
 		inner := strings.TrimSpace(s[start+2 : end])
 		b.WriteString(s[:start])
-		if inner != "" && !strings.HasPrefix(inner, ".") {
-			inner = "." + inner
-		}
-		b.WriteString("{{ " + inner + " }}")
+		b.WriteString("{{ " + fieldRef(inner) + " }}")
 		s = s[end+2:]
 	}
 }

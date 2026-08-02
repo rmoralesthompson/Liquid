@@ -27,6 +27,15 @@ const (
 	// CodeUnknownReference reports a template expression referencing a field
 	// or method that does not exist on the paired struct.
 	CodeUnknownReference Code = "LSX004"
+	// CodeMalformedDirective reports a structural directive whose expression
+	// does not match the directive's grammar.
+	CodeMalformedDirective Code = "LSX005"
+	// CodeConflictingDirectives reports an element carrying more than one
+	// structural directive.
+	CodeConflictingDirectives Code = "LSX006"
+	// CodeBrokenPairedPackage reports a paired Go package that fails
+	// type-checking; the position points into the offending Go source.
+	CodeBrokenPairedPackage Code = "LSX007"
 )
 
 // Diagnostic is one structured compiler finding: the literal contract an
