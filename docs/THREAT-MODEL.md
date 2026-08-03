@@ -323,9 +323,10 @@ Each known defect from the original design material, mapped to what keeps it fix
 ## Formerly open decisions — settled 2026-08-03 (D15 amended)
 
 All three were decided by the maintainer and D15 amended accordingly; each has an
-implementation ticket. Until those tickets land, the code reflects the *pre-decision*
-behavior described below — the "risk" text stays accurate as a description of the gap
-being closed.
+implementation ticket. Signature-only encoding (#45) and patch-envelope re-mint (#46)
+have since landed — items 1 and 2 below describe the closed gap and cite the code and
+pinning test that close it. Item 3 (#47) is decided but not yet implemented, so its code
+still reflects the *pre-decision* behavior described.
 
 1. **CSRF token embeds the raw session ID, and the token is stamped into the DOM**
    (`liquid-csrf` meta + hidden inputs). Injected script could read the HttpOnly
@@ -333,13 +334,20 @@ being closed.
    ([#45](https://github.com/rmoralesthompson/Liquid/issues/45)): signature-only
    encoding** — the token carries `expiry:signature` only; the server recovers the
    session ID from the request's cookie. Originally recorded on
-   [#9](https://github.com/rmoralesthompson/Liquid/issues/9).
+   [#9](https://github.com/rmoralesthompson/Liquid/issues/9). **Implemented:** `mintCSRF`
+   encodes `expiry:signature` (`core/csrf.go`); pinned by
+   `TestCSRFTokenDoesNotDiscloseTheSessionID`.
 2. **CSRF expiry is fixed at render time while the session idle window slides** (#9's
    second observation): a page dispatching events for longer than the idle window keeps
    its session alive but starts getting 403s at the token's fixed expiry. **Decided
    ([#46](https://github.com/rmoralesthompson/Liquid/issues/46)): re-mint the token in
    every patch envelope**, with the runtime refreshing the meta tag and hidden inputs —
-   token lifetime follows the session's sliding deadline.
+   token lifetime follows the session's sliding deadline. **Implemented:**
+   `serveHydroEvent` re-mints on each patch answer (`Envelope.CSRF`, `core/hydro.go`),
+   the runtime's `refreshCSRF` (`core/runtime.js`) restamps the `liquid-csrf` meta tag
+   and the swapped subtree's `csrf_token` inputs, and `liquidtest`'s `Patch.CSRFToken()`
+   exposes the rotated token; pinned by
+   `TestEventPatchReMintsCSRFTokenTrackingTheSlidingWindow`.
 3. **`Secure` cookie vs `http://localhost` dev serving** (D15): the cookie is always set
    `Secure` (`core/hydro.go:367`). Modern browsers treat `localhost` as a trustworthy
    origin and accept it, so `liquid dev` works; but any plain-HTTP **non-localhost**

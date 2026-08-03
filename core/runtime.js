@@ -58,6 +58,20 @@
     return meta ? meta.content : "";
   }
 
+  // refreshCSRF applies a patch answer's re-minted token (#46): the
+  // liquid-csrf meta tag the click/submit path reads, and any csrf_token
+  // hidden inputs the server re-rendered into the just-swapped subtree (whose
+  // value still carries the original render's token). Keeping the token in
+  // lockstep with the server's re-mint tracks the session's sliding idle
+  // window, so a long-open page stops earning a spurious 403 (D15).
+  function refreshCSRF(root, token) {
+    const meta = document.querySelector('meta[name="liquid-csrf"]');
+    if (meta) meta.content = token;
+    for (const input of root.querySelectorAll('input[name="csrf_token"]')) {
+      input.value = token;
+    }
+  }
+
   // navigate performs a redirect answer's client-side navigation. The target
   // is author-supplied and rides the envelope verbatim, so a javascript: or
   // data: scheme would execute in this origin if handed straight to
@@ -96,6 +110,9 @@
       return;
     }
     if (env.patch) applyPatch(root, env.patch);
+    // The swap has replaced root's children; restamp the re-minted token into
+    // the fresh subtree and the shared meta tag (#46).
+    if (env.csrf) refreshCSRF(root, env.csrf);
   }
 
   document.addEventListener("click", (e) => {

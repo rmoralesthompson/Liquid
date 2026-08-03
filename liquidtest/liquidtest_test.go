@@ -1,6 +1,7 @@
 package liquidtest_test
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -122,6 +123,36 @@ func TestHarnessFiresAnActionAndExposesThePatch(t *testing.T) {
 	// session continuity.
 	if got := page.Fire("Increment").Text("#count"); got != "2" {
 		t.Errorf(`second patch Text("#count") = %q, want "2"`, got)
+	}
+}
+
+func TestPatchExposesReMintedCSRFTokenThatValidates(t *testing.T) {
+	h := newCounterHarness(t)
+	page := h.Get("/")
+
+	patch := page.Fire("Increment")
+
+	if patch.CSRFToken() == "" {
+		t.Fatal("Patch.CSRFToken() is empty; a patch answer must re-mint the token (#46)")
+	}
+	// The re-minted token is the live one going forward: firing with it
+	// (standing in for the runtime's meta-tag restamp) is accepted.
+	if got := page.Fire("Increment", liquidtest.CSRF(patch.CSRFToken())).Code; got != http.StatusOK {
+		t.Errorf("event carrying the re-minted token = %d, want %d", got, http.StatusOK)
+	}
+}
+
+func TestRedirectPatchCarriesNoReMintedToken(t *testing.T) {
+	h := newRenamerHarness(t)
+	page := h.Get("/")
+
+	patch := page.Fire("Close")
+
+	if patch.Envelope.Redirect == "" {
+		t.Fatal("Close should answer with a redirect")
+	}
+	if patch.CSRFToken() != "" {
+		t.Errorf("redirect answer re-minted a token %q; there is no patch to restamp it into", patch.CSRFToken())
 	}
 }
 

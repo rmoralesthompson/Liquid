@@ -436,10 +436,14 @@ func resolveActions(v reflect.Value) (map[string]action, error) {
 }
 
 // Envelope is the hydro event response (D19): an HTML patch to swap at the
-// [hydroId] boundary, or a redirect for the runtime to navigate to.
+// [hydroId] boundary, or a redirect for the runtime to navigate to. A patch
+// answer also re-mints the render's CSRF token (D15, #46) so a long-open
+// interactive page tracks the session's sliding idle deadline instead of the
+// original render's fixed horizon; it is empty on a redirect answer.
 type Envelope struct {
 	Patch    string `json:"patch,omitempty"`
 	Redirect string `json:"redirect,omitempty"`
+	CSRF     string `json:"csrf,omitempty"`
 }
 
 // hydroEvent is the payload the runtime script posts.
@@ -526,8 +530,15 @@ func (a *App) serveHydroEvent(w http.ResponseWriter, r *http.Request) {
 	var renderErr error
 	if env.Redirect == "" {
 		// Only a patch answer needs the re-render (D19); renderStateLocked
-		// makes it reflect any subject emission the handler just made.
+		// makes it reflect any subject emission the handler just made. The
+		// same answer re-mints the CSRF token against the current clock, so
+		// its expiry tracks the session's sliding idle deadline — which
+		// dispatching this event just extended — rather than the original
+		// render's fixed horizon (D15/D2, #46); the runtime restamps it into
+		// the liquid-csrf meta tag and the swapped subtree's csrf_token
+		// inputs. A redirect answer navigates away, so it carries no token.
 		env.Patch, renderErr = a.renderStateLocked(st, ck.Value)
+		env.CSRF = mintCSRF(a.csrfSecret, ck.Value, a.limits.SessionIdleTimeout, a.now())
 	}
 	sess.dispatch.Unlock()
 	if renderErr != nil {

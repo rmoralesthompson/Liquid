@@ -1,6 +1,7 @@
 package liquid
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -82,12 +83,28 @@ func renderWB(t *testing.T, app *App) wbSession {
 // fireWB POSTs a hydro event as the given session and returns the status.
 func fireWB(t *testing.T, app *App, sess wbSession, action string) int {
 	t.Helper()
-	payload := fmt.Sprintf(`{"hydroId":%q,"action":%q,"csrfToken":%q}`, sess.hydro, action, sess.csrf)
+	code, _ := fireWBReply(t, app, sess, action, sess.csrf)
+	return code
+}
+
+// fireWBReply POSTs a hydro event carrying an explicit CSRF token (so a test
+// can send a stale one) and returns the status plus the decoded envelope. The
+// envelope is the zero value for any non-200 response.
+func fireWBReply(t *testing.T, app *App, sess wbSession, action, csrf string) (int, Envelope) {
+	t.Helper()
+	payload := fmt.Sprintf(`{"hydroId":%q,"action":%q,"csrfToken":%q}`, sess.hydro, action, csrf)
 	req := httptest.NewRequest(http.MethodPost, hydroEventPath, strings.NewReader(payload))
 	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sess.id})
 	rec := httptest.NewRecorder()
 	app.ServeHTTP(rec, req)
-	return rec.Code
+	if rec.Code != http.StatusOK {
+		return rec.Code, Envelope{}
+	}
+	var env Envelope
+	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decoding event envelope: %v (body %q)", err, rec.Body.String())
+	}
+	return rec.Code, env
 }
 
 func TestCSRFTokenExpiryTracksTheIdleWindow(t *testing.T) {
@@ -112,6 +129,57 @@ func TestCSRFTokenExpiryTracksTheIdleWindow(t *testing.T) {
 	}
 	if want := clock.t.Add(2 * time.Hour).Unix(); expiry != want {
 		t.Errorf("token expiry = %d, want %d (render time + the idle window, D15/D2)", expiry, want)
+	}
+}
+
+func TestEventPatchReMintsCSRFTokenTrackingTheSlidingWindow(t *testing.T) {
+	idle := time.Hour
+	clock := &tickClock{t: time.Unix(1_700_000_000, 0)}
+	app := New(WithLimits(Limits{SessionIdleTimeout: idle}))
+	app.now = clock.now
+	if err := app.Route("/", &idleCounter{}); err != nil {
+		t.Fatalf("Route: %v", err)
+	}
+
+	sess := renderWB(t, app)
+	original := sess.csrf
+
+	// A patch answer must carry a freshly minted token whose expiry is the
+	// current time plus the idle window — the same sliding deadline touching
+	// the session extends (D15/D2, #46), not the render's fixed horizon.
+	clock.t = clock.t.Add(40 * time.Minute)
+	code, env := fireWBReply(t, app, sess, "Increment", original)
+	if code != http.StatusOK {
+		t.Fatalf("event within the original window = %d, want %d", code, http.StatusOK)
+	}
+	if env.CSRF == "" {
+		t.Fatal("patch envelope carries no re-minted csrf token (#46)")
+	}
+	if env.CSRF == original {
+		t.Error("patch envelope re-served the original token; it must re-mint against the current clock")
+	}
+	expiry, err := strconv.ParseInt(strings.Split(env.CSRF, ":")[0], 10, 64)
+	if err != nil {
+		t.Fatalf("re-minted token %q is not expiry:signature: %v", env.CSRF, err)
+	}
+	if want := clock.t.Add(idle).Unix(); expiry != want {
+		t.Errorf("re-minted token expiry = %d, want %d (now + idle window)", expiry, want)
+	}
+
+	// The point of re-minting: keep a continuously used page alive past the
+	// original token's horizon. Advance to just before the *re-minted*
+	// deadline — beyond where the original would have expired — and the
+	// rotated token still dispatches while the original now would not.
+	clock.t = clock.t.Add(50 * time.Minute) // 90 min since render; original expired at 60
+	if validCSRF(app.csrfSecret, original, sess.id, app.now()) {
+		t.Fatal("test premise broken: the original token has not expired")
+	}
+	rotated := wbSession{id: sess.id, hydro: sess.hydro, csrf: env.CSRF}
+	if code, _ := fireWBReply(t, app, rotated, "Increment", rotated.csrf); code != http.StatusOK {
+		t.Errorf("event with the re-minted token past the original horizon = %d, want %d", code, http.StatusOK)
+	}
+	if code := fireWB(t, app, sess, "Increment"); code == http.StatusOK {
+		t.Error("the original token still dispatched past its expiry; re-minting must be what keeps the session usable")
 	}
 }
 
