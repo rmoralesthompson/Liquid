@@ -67,6 +67,18 @@ func (s *sseStream) send(f sseFrame) {
 	}
 }
 
+// tokenPrefix is what a log line may carry of a hydro token: enough of a
+// prefix to correlate log entries with a page's [data-hydro-id], never the
+// dispatchable credential itself — tokens must stay out of the log sink
+// (THREAT-MODEL.md boundary 5).
+func tokenPrefix(token string) string {
+	const keep = 8
+	if len(token) <= keep {
+		return token
+	}
+	return token[:keep] + "…"
+}
+
 // startPump activates a live instance's subscriptions, returning the stop
 // that undoes them and the prime that nudges a current-state push. One pump
 // goroutine owns the instance's push loop: an emission (or a prime) marks
@@ -101,12 +113,12 @@ func (a *App) startPump(sess *hydroSession, st *hydroState, hydroID string) (sto
 			patch, err := a.renderStateLocked(st, sess.id)
 			sess.dispatch.Unlock()
 			if err != nil {
-				a.logger.Error("rendering pushed patch", "hydroId", hydroID, "error", err)
+				a.logger.Error("rendering pushed patch", "hydroIdPrefix", tokenPrefix(hydroID), "error", err)
 				continue
 			}
 			frame, err := patchFrame(sseMsg{HydroID: hydroID, Patch: patch})
 			if err != nil {
-				a.logger.Error("encoding sse patch", "hydroId", hydroID, "error", err)
+				a.logger.Error("encoding sse patch", "hydroIdPrefix", tokenPrefix(hydroID), "error", err)
 				continue
 			}
 			for _, stream := range a.hydro.sessionStreams(sess) {
