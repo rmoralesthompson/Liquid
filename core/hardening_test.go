@@ -100,18 +100,38 @@ func TestCSRFTokenExpiryTracksTheIdleWindow(t *testing.T) {
 
 	sess := renderWB(t, app)
 
-	// The token encodes sessionID:expiryUnix:signature (D15); its expiry
-	// must track the configured idle window, not a fixed TTL.
+	// The token encodes expiryUnix:signature (D15 as amended by #45); its
+	// expiry must track the configured idle window, not a fixed TTL.
 	parts := strings.Split(sess.csrf, ":")
-	if len(parts) != 3 {
-		t.Fatalf("csrf token %q is not sessionID:expiry:signature", sess.csrf)
+	if len(parts) != 2 {
+		t.Fatalf("csrf token %q is not expiry:signature", sess.csrf)
 	}
-	expiry, err := strconv.ParseInt(parts[1], 10, 64)
+	expiry, err := strconv.ParseInt(parts[0], 10, 64)
 	if err != nil {
-		t.Fatalf("csrf token expiry %q is not unix seconds: %v", parts[1], err)
+		t.Fatalf("csrf token expiry %q is not unix seconds: %v", parts[0], err)
 	}
 	if want := clock.t.Add(2 * time.Hour).Unix(); expiry != want {
 		t.Errorf("token expiry = %d, want %d (render time + the idle window, D15/D2)", expiry, want)
+	}
+}
+
+func TestCSRFTokenDoesNotDiscloseTheSessionID(t *testing.T) {
+	app := New()
+	if err := app.Route("/", &idleCounter{}); err != nil {
+		t.Fatalf("Route: %v", err)
+	}
+
+	sess := renderWB(t, app)
+
+	// The session cookie is HttpOnly; the CSRF token is stamped into the
+	// DOM (meta tag + hidden inputs). A token embedding the raw session ID
+	// hands any DOM-reading script the cookie's value (#45, D15 as
+	// amended): the token must be signature-only.
+	if strings.Contains(sess.csrf, sess.id) {
+		t.Errorf("csrf token %q embeds the session ID %q; the DOM must not carry the HttpOnly cookie's value", sess.csrf, sess.id)
+	}
+	if code := fireWB(t, app, sess, "Increment"); code != http.StatusOK {
+		t.Errorf("event with the page's signature-only token = %d, want %d", code, http.StatusOK)
 	}
 }
 
