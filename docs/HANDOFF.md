@@ -1,6 +1,6 @@
 # Liquid — Implementation Handoff
 
-**Date:** 2026-08-02 · **For:** a fresh session continuing implementation. **v0.1 is code-complete: #2–#13 are all done** (#12, the last ticket, is on PR #28 from `ticket-12-dev-loop`). **Frontier: the post-v0.1 tickets — #26 (`*liquidDefer`, ready-for-agent) and #27 (parallel sibling OnInit, needs-triage, blocked on a human decision).** Do not start #27 without that decision; #26 is the next agent-workable slice.
+**Date:** 2026-08-02 · **For:** a fresh session continuing implementation. **v0.1 is code-complete: #2–#13 are all done** (#12, the last ticket, is on PR #28 from `ticket-12-dev-loop`). **Frontier: the post-v0.1 tickets — #26 (`*liquidDefer`, ready-for-agent), the security track #29 → #30 (threat model, then a security-review pass; both ready-for-agent, #30 native-blocked on #29), and #27 (parallel sibling OnInit, needs-triage, blocked on a human decision).** Do not start #27 without that decision; #26 and #29 are the agent-workable slices and are independent of each other.
 
 > **Workflow (since #5):** a repo hook blocks pushing to `main` — work on a feature branch and open a PR (commit titles are hook-checked; the `Ticket #n:` / `Docs:` / `CI:` / `Chore:` prefixes in the log are the pattern).
 >
@@ -49,6 +49,8 @@ A server-driven UI framework for Go: **Phoenix LiveView's runtime model + Angula
 
 - **[#26 — `*liquidDefer`](https://github.com/rmoralesthompson/Liquid/issues/26)** (ready-for-agent): deferred components streamed over SSE — render a placeholder, stream the real subtree when its data lands. Unblocked now that #13 closed; design constraints and open questions are in the issue body. Natural building blocks already exist: the `event:`-typed SSE framing (`core/sse.go`), per-entry pumps, `Ctx.Fanout` for the loading side.
 - **[#27 — parallel sibling OnInit](https://github.com/rmoralesthompson/Liquid/issues/27)** (needs-triage): **blocked on a human decision** — should children get OnInit at all, given v0.1 children are input-driven projections (#11)? Do not pick this up before the human weighs in; `Ctx.Fanout` (#23) already covers the intra-component concurrency story.
+- **[#29 — threat model](https://github.com/rmoralesthompson/Liquid/issues/29)** (ready-for-agent): `docs/THREAT-MODEL.md` — per-boundary attacker/assets/controls with code + pinning-test citations, the agent-facing prompt-injection posture (D13 diagnostics quote untrusted source), and the #9 open decisions folded in as explicitly-open items. The issue body is the spec; read it whole. Swaps to `ready-for-human` for signoff when drafted (that label is still uncreated — create it then).
+- **[#30 — security-review pass](https://github.com/rmoralesthompson/Liquid/issues/30)** (ready-for-agent, **blocked by #29**): adversarial pass over `core/`, `cmd/liquid/`, the runtime scripts against THREAT-MODEL.md + CLAUDE.md invariants; `/security-review` is the starting harness. The issue body carries the specific probes worth not losing (refusal order, SSE races, dev residue in prod builds, CLI path handling, GO001 sink chain, log hygiene).
 - Still open for whoever needs it: D24's App shutdown lifecycle remains unbuilt (the #9 idle-GC sweep deferral rides with it; `liquid dev` kills its child by signal today and did not need it).
 
 ## 5. Reading order for a fresh context
