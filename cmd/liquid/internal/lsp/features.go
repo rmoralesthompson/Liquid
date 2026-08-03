@@ -133,7 +133,7 @@ func goForTarget(expr string, exprStart, off int) target {
 	if !ok {
 		return target{}
 	}
-	varIdx := strings.Index(expr, loopVar)
+	varIdx := goForVarIndex(expr)
 	if sp := (span{exprStart + varIdx, exprStart + varIdx + len(loopVar)}); sp.contains(off) {
 		return target{kind: targetLoopVar, name: loopVar, span: sp}
 	}
@@ -142,6 +142,23 @@ func goForTarget(expr string, exprStart, off int) target {
 		return exprTarget(list, exprStart+listIdx, off)
 	}
 	return target{}
+}
+
+// goForVarIndex locates the loop variable's byte index inside a *goFor
+// expression that already parsed: the token after the "let" keyword. A
+// plain strings.Index would misfire on variables that are substrings of
+// "let" itself (a variable named t matches inside the keyword).
+func goForVarIndex(expr string) int {
+	i := 0
+	skipSpace := func() {
+		for i < len(expr) && (expr[i] == ' ' || expr[i] == '\t' || expr[i] == '\r' || expr[i] == '\n') {
+			i++
+		}
+	}
+	skipSpace()
+	i += len("let")
+	skipSpace()
+	return i
 }
 
 // member finds a paired-struct member by exact name.
@@ -268,7 +285,7 @@ func (d *document) definition(off int) []Location {
 	case targetLoopVar:
 		if use := d.loopVarUse(t.name); use != nil {
 			exprStart := d.offsetOf(use.Line, use.Col)
-			idx := strings.Index(use.Expr, t.name)
+			idx := goForVarIndex(use.Expr)
 			sp := span{exprStart + idx, exprStart + idx + len(t.name)}
 			return []Location{{URI: d.uri, Range: d.rangeOf(sp)}}
 		}
@@ -331,7 +348,7 @@ func (d *document) exprOccurrences() []exprOcc {
 			}
 			// The declaration site has no $ sigil in source; record the name
 			// with one so it matches $var references, spanning just the var.
-			varIdx := strings.Index(use.Expr, loopVar)
+			varIdx := goForVarIndex(use.Expr)
 			occs = append(occs, exprOcc{
 				name:     "$" + loopVar,
 				sp:       span{exprStart + varIdx, exprStart + varIdx + len(loopVar)},

@@ -66,6 +66,17 @@ func (d *document) rangeOf(s span) Range {
 	return Range{Start: d.positionAt(s.start), End: d.positionAt(s.end)}
 }
 
+// tokenLenAt is the byte length of the identifier-shaped token starting at
+// off, so a diagnostic can span what it points at instead of collapsing to
+// a zero-width range.
+func (d *document) tokenLenAt(off int) int {
+	end := off
+	for end < len(d.text) && isTokenByte(d.text[end]) {
+		end++
+	}
+	return end - off
+}
+
 // utf16RuneLen is the UTF-16 code unit count of one rune.
 func utf16RuneLen(r rune) int {
 	if r > 0xFFFF {

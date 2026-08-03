@@ -162,6 +162,7 @@ func (s *Server) handleDidChange(ctx context.Context, req *request) error {
 func (s *Server) handleDidClose(req *request) error {
 	var p didCloseParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
+		s.logger.Warn("bad didClose params", "err", err)
 		return nil
 	}
 	if _, ok := s.docs[p.TextDocument.URI]; !ok {
@@ -261,8 +262,8 @@ func (s *Server) publishDiagnostics(doc *document) error {
 		}
 		var rng Range
 		if d.File == doc.path {
-			pos := doc.positionAt(doc.offsetOf(d.Line, d.Col))
-			rng = Range{Start: pos, End: pos}
+			start := doc.offsetOf(d.Line, d.Col)
+			rng = Range{Start: doc.positionAt(start), End: doc.positionAt(start + doc.tokenLenAt(start))}
 		} else {
 			msg = fmt.Sprintf("%s:%d:%d: %s", filepath.Base(d.File), d.Line, d.Col, msg)
 		}
@@ -300,7 +301,13 @@ func uriToPath(uri string) (string, error) {
 	if u.Scheme != "file" {
 		return "", fmt.Errorf("unsupported document URI scheme %q", u.Scheme)
 	}
-	return u.Path, nil
+	path := u.Path
+	// Windows clients send file:///C:/… which parses to /C:/…; strip the
+	// leading slash so the drive-letter path resolves.
+	if len(path) >= 3 && path[0] == '/' && path[2] == ':' {
+		path = path[1:]
+	}
+	return path, nil
 }
 
 // pathToURI builds the file:// URI for a filesystem path.

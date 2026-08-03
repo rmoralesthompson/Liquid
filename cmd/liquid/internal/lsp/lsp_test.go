@@ -451,6 +451,130 @@ func TestMissingPairedSourceYieldsLSX002(t *testing.T) {
 	}
 }
 
+func TestLoopVarNamedTResolvesOutsideTheLetKeyword(t *testing.T) {
+	c := newClient(t)
+	_, uri, text := fixture(t)
+	edited := strings.ReplaceAll(text, "let log of Logs", "let t of Logs")
+	edited = strings.ReplaceAll(edited, "{{ $log }}", "{{ $t }}")
+	if diags := c.open(uri, edited); len(diags) != 0 {
+		t.Fatalf("edited fixture has diagnostics: %+v", diags)
+	}
+
+	res := c.request("textDocument/definition", positionParams(uri, pos(t, edited, "{{ $t }}", 4)))
+
+	var locs []lsp.Location
+	if err := json.Unmarshal(res, &locs); err != nil {
+		t.Fatalf("decoding definition: %v (%s)", err, res)
+	}
+	if len(locs) != 1 || locs[0].URI != uri {
+		t.Fatalf("locations = %+v, want the declaring *goFor in this document", locs)
+	}
+	// The variable t is a substring of the let keyword; the definition must
+	// land on the variable itself, not inside "let".
+	want := pos(t, edited, "t of Logs", 0)
+	if locs[0].Range.Start.Line != want["line"] || locs[0].Range.Start.Character != want["character"] {
+		t.Errorf("definition at %+v, want %v", locs[0].Range.Start, want)
+	}
+
+	res = c.request("textDocument/documentHighlight", positionParams(uri, pos(t, edited, "{{ $t }}", 4)))
+	var hs []lsp.DocumentHighlight
+	if err := json.Unmarshal(res, &hs); err != nil {
+		t.Fatalf("decoding highlights: %v (%s)", err, res)
+	}
+	if len(hs) != 2 {
+		t.Errorf("highlights = %+v, want the let declaration and the interpolation", hs)
+	}
+}
+
+func TestDefinitionOfHandlerPointsAtMethod(t *testing.T) {
+	c := newClient(t)
+	dir, uri, text := fixture(t)
+	c.open(uri, text)
+
+	res := c.request("textDocument/definition", positionParams(uri, pos(t, text, `(click)="Refresh"`, 10)))
+
+	var locs []lsp.Location
+	if err := json.Unmarshal(res, &locs); err != nil {
+		t.Fatalf("decoding definition: %v (%s)", err, res)
+	}
+	if len(locs) != 1 {
+		t.Fatalf("locations = %+v, want exactly one", locs)
+	}
+	if want := "file://" + filepath.Join(dir, "dashboard.go"); locs[0].URI != want {
+		t.Fatalf("definition URI = %q, want %q", locs[0].URI, want)
+	}
+	goSrc, err := os.ReadFile(filepath.Join(dir, "dashboard.go"))
+	if err != nil {
+		t.Fatalf("reading dashboard.go: %v", err)
+	}
+	want := pos(t, string(goSrc), "Refresh() {", 0)
+	if locs[0].Range.Start.Line != want["line"] || locs[0].Range.Start.Character != want["character"] {
+		t.Errorf("definition at %+v, want the method declaration %v", locs[0].Range.Start, want)
+	}
+}
+
+func TestHoverOnEventBindingAndChildSelector(t *testing.T) {
+	c := newClient(t)
+	_, uri, text := fixture(t)
+	c.open(uri, text)
+
+	res := c.request("textDocument/hover", positionParams(uri, pos(t, text, "(click)", 1)))
+	var h lsp.Hover
+	if err := json.Unmarshal(res, &h); err != nil {
+		t.Fatalf("decoding hover: %v (%s)", err, res)
+	}
+	if !strings.Contains(h.Contents.Value, "Binds a click") {
+		t.Errorf("(click) hover %q is not the binding documentation", h.Contents.Value)
+	}
+
+	res = c.request("textDocument/hover", positionParams(uri, pos(t, text, "app-stat-card", 3)))
+	if err := json.Unmarshal(res, &h); err != nil {
+		t.Fatalf("decoding hover: %v (%s)", err, res)
+	}
+	for _, want := range []string{"StatCard", "component", "fixture child component"} {
+		if !strings.Contains(h.Contents.Value, want) {
+			t.Errorf("selector hover %q missing %q", h.Contents.Value, want)
+		}
+	}
+}
+
+func TestDiagnosticRangeSpansTheOffendingToken(t *testing.T) {
+	c := newClient(t)
+	_, uri, text := fixture(t)
+	broken := strings.Replace(text, "{{ Title }}", "{{ Titel }}", 1)
+
+	diags := c.open(uri, broken)
+
+	if len(diags) != 1 {
+		t.Fatalf("diagnostics = %+v, want one", diags)
+	}
+	width := diags[0].Range.End.Character - diags[0].Range.Start.Character
+	if width != len("Titel") {
+		t.Errorf("diagnostic spans %d characters, want %d covering the identifier", width, len("Titel"))
+	}
+}
+
+func TestShutdownRepliesAndDidCloseClearsDiagnostics(t *testing.T) {
+	c := newClient(t)
+	_, uri, text := fixture(t)
+	broken := strings.Replace(text, "{{ Title }}", "{{ Titel }}", 1)
+	if diags := c.open(uri, broken); len(diags) != 1 {
+		t.Fatalf("expected one diagnostic to start from, got %+v", diags)
+	}
+
+	c.notify("textDocument/didClose", map[string]any{
+		"textDocument": map[string]any{"uri": uri},
+	})
+	c.record(c.read())
+	if diags := c.diags[uri]; len(diags) != 0 {
+		t.Errorf("diagnostics after didClose = %+v, want cleared", diags)
+	}
+
+	if res := c.request("shutdown", nil); string(res) != "null" {
+		t.Errorf("shutdown result = %s, want null", res)
+	}
+}
+
 // slicesContains reports whether list has the exact string.
 func slicesContains(list []string, want string) bool {
 	for _, s := range list {
