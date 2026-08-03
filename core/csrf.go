@@ -26,25 +26,23 @@ func csrfSignature(secret []byte, sessionID string, expiry int64) string {
 }
 
 // mintCSRF issues a CSRF token bound to sessionID, expiring ttl — the
-// session idle window (D15/D2) — from now, encoded
-// sessionID:expiryUnix:signature (D15). Session IDs are base64url, so the
-// colons unambiguously delimit the segments. Tokens are regenerated on every
-// full-page render, so the window only matters for a page left open
-// untouched.
+// session idle window (D15/D2) — from now, encoded expiryUnix:signature
+// (D15 as amended by #45). The session ID is signed over but never encoded:
+// the token is stamped into the DOM (meta tag, hidden inputs) while the
+// session cookie is HttpOnly, so embedding the ID would hand DOM-reading
+// script the cookie's value. Tokens are regenerated on every full-page
+// render, so the window only matters for a page left open untouched.
 func mintCSRF(secret []byte, sessionID string, ttl time.Duration, now time.Time) string {
 	expiry := now.Add(ttl).Unix()
-	return sessionID + ":" + strconv.FormatInt(expiry, 10) + ":" + csrfSignature(secret, sessionID, expiry)
+	return strconv.FormatInt(expiry, 10) + ":" + csrfSignature(secret, sessionID, expiry)
 }
 
 // validCSRF reports whether token is an unexpired token this server minted
-// for sessionID: the embedded session must match the request's, the expiry
-// must be ahead of now, and the signature must recompute (D15).
+// for sessionID — recovered from the request's cookie, never from the token
+// (#45): the expiry must be ahead of now, and the signature must recompute
+// over the cookie's session ID (D15).
 func validCSRF(secret []byte, token, sessionID string, now time.Time) bool {
-	tokenSession, rest, ok := strings.Cut(token, ":")
-	if !ok || tokenSession != sessionID {
-		return false
-	}
-	expiryText, signature, ok := strings.Cut(rest, ":")
+	expiryText, signature, ok := strings.Cut(token, ":")
 	if !ok {
 		return false
 	}
