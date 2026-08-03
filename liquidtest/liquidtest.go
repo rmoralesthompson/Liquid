@@ -235,6 +235,14 @@ func (p *Patch) Text(selector string) string {
 	return textOf(p.h.t, p.doc, selector)
 }
 
+// CSRFToken returns the token the patch answer re-minted (#46) — the value
+// the runtime script restamps into the liquid-csrf meta tag and the swapped
+// subtree's csrf_token inputs so the token tracks the session's sliding idle
+// window. It is "" for a redirect answer or a refused event.
+func (p *Patch) CSRFToken() string {
+	return p.Envelope.CSRF
+}
+
 // Ctx builds a liquid.Ctx for unit-testing lifecycle hooks by hand, outside
 // a running App. A nil req gets a default GET / request, so the zero-config
 // call is safe; params seeds what Ctx.Param returns.
