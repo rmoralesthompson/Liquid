@@ -32,6 +32,15 @@ jobs:
           # golangci-lint auto-detects .golangci.yml, not this repo's filename
           args: --timeout=5m --config=.golangci-lint.yml
 
+      - name: Run golangci-lint (liquiddev build tag)
+        if: hashFiles('go.mod') != ''
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          # The dev-mode surface (core/dev_on.go and its tests) only compiles
+          # under the liquiddev tag; lint that flavor too.
+          args: --timeout=5m --config=.golangci-lint.yml --build-tags=liquiddev
+
       - name: Skip (no go.mod yet)
         if: hashFiles('go.mod') == ''
         run: echo "No go.mod yet — implementation has not started (see docs/HANDOFF.md). Skipping lint."
@@ -53,6 +62,12 @@ jobs:
       - name: Run Tests
         if: hashFiles('go.mod') != ''
         run: go test -v -race -coverprofile=coverage.txt ./...
+
+      - name: Run Tests (liquiddev build tag)
+        if: hashFiles('go.mod') != ''
+        # The dev-mode surface and its white-box tests exist only under the
+        # tag; core is the only package whose behavior differs.
+        run: go test -v -race -tags liquiddev ./core
 
       - name: Skip (no go.mod yet)
         if: hashFiles('go.mod') == ''

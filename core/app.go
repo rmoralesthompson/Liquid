@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"runtime/debug"
 	"strings"
 	"time"
 )
@@ -28,6 +29,7 @@ type App struct {
 	csrfSecret []byte                   // HMAC key for CSRF tokens, minted per process (D15)
 	limits     Limits                   // registry and request bounds, defaults applied (D20)
 	now        func() time.Time         // the App's clock; replaceable in tests for idle-expiry control
+	dev        devState                 // dev-build broadcaster (D16); an empty struct in production builds
 }
 
 // registration is one component type's render machinery, resolved once when
@@ -174,6 +176,7 @@ func New(opts ...Option) *App {
 	for _, opt := range opts {
 		opt(a)
 	}
+	a.initDev()
 	return a
 }
 
@@ -342,19 +345,13 @@ func validatePrototype(structV reflect.Value, path string) error {
 	return nil
 }
 
-// errorPageHTML is the framework error page: clean by design — the
-// underlying error goes to the log, never to the client (D18; dev-mode
-// diagnostics are a later slice).
-const errorPageHTML = `<!doctype html>
-<html><head><title>500 · Liquid</title></head>
-<body><h1>Something went wrong</h1><p>The server hit an error handling this request.</p></body></html>
-`
-
-// errorPage writes the framework error page as a 500 response.
-func (a *App) errorPage(w http.ResponseWriter) {
+// errorPage writes the framework error page as a 500 response. detail is the
+// underlying diagnostic: dev builds render it on the page (D18's dev half),
+// production builds ignore it — there the error lives only in the log.
+func (a *App) errorPage(w http.ResponseWriter, detail string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusInternalServerError)
-	if _, err := w.Write([]byte(errorPageHTML)); err != nil {
+	if _, err := w.Write([]byte(errorPageBody(detail))); err != nil {
 		a.logger.Error("writing error page", "error", err)
 	}
 }
@@ -372,7 +369,7 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			panic(rec) // net/http's own abort sentinel — not ours to handle
 		}
 		a.logger.Error("panic serving request", "path", r.URL.Path, "panic", rec)
-		a.errorPage(w)
+		a.errorPage(w, fmt.Sprintf("panic: %v\n\n%s", rec, debug.Stack()))
 	}()
 
 	if r.URL.Path == hydroEventPath {
@@ -387,8 +384,7 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if r.URL.Path == runtimeScriptPath {
-		a.serveRuntimeScript(w)
+	if a.serveScript(w, r) {
 		return
 	}
 	if a.static != nil && strings.HasPrefix(r.URL.Path, staticPrefix) {
@@ -411,6 +407,20 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.renderRoute(w, r, rt, params, ctx)
+}
+
+// serveScript handles the framework's fixed script paths: the runtime script
+// in every build, plus the dev script in dev builds only.
+func (a *App) serveScript(w http.ResponseWriter, r *http.Request) bool {
+	if r.URL.Path == runtimeScriptPath {
+		a.serveRuntimeScript(w)
+		return true
+	}
+	if devMode && r.URL.Path == devScriptPath {
+		a.serveDevScript(w)
+		return true
+	}
+	return false
 }
 
 // registerHydro puts a rendered interactive instance in the session
@@ -510,7 +520,7 @@ func (a *App) renderRoute(w http.ResponseWriter, r *http.Request, rt *route, par
 		var err error
 		if sessionID, hydroID, csrf, err = a.mintRenderTokens(w, r, reg); err != nil {
 			a.logger.Error("establishing hydro session", "path", r.URL.Path, "error", err)
-			a.errorPage(w)
+			a.errorPage(w, err.Error())
 			return
 		}
 		ctx.session = sessionID
@@ -525,7 +535,7 @@ func (a *App) renderRoute(w http.ResponseWriter, r *http.Request, rt *route, par
 	if init, ok := inst.Interface().(Initializer); ok {
 		if err := init.OnInit(ctx); err != nil {
 			a.logger.Error("initializing component", "path", r.URL.Path, "error", err)
-			a.errorPage(w)
+			a.errorPage(w, err.Error())
 			return
 		}
 	}
@@ -533,7 +543,7 @@ func (a *App) renderRoute(w http.ResponseWriter, r *http.Request, rt *route, par
 	body, err := a.executeComponent(reg, inst, &renderScope{a: a, ensure: ensure})
 	if err != nil {
 		a.logger.Error("rendering component", "path", r.URL.Path, "error", err)
-		a.errorPage(w)
+		a.errorPage(w, err.Error())
 		return
 	}
 	if reg.hydroField >= 0 {
@@ -556,9 +566,9 @@ func (a *App) renderRoute(w http.ResponseWriter, r *http.Request, rt *route, par
 // writes the complete page.
 func (a *App) writeShell(w http.ResponseWriter, path string, head Head, csrf, body string) {
 	var page bytes.Buffer
-	if err := shellTmpl.Execute(&page, shellData{Head: head, CSRF: csrf, Body: template.HTML(body)}); err != nil {
+	if err := shellTmpl.Execute(&page, shellData{Head: head, CSRF: csrf, Body: template.HTML(body), Dev: devShellScript}); err != nil {
 		a.logger.Error("rendering document shell", "path", path, "error", err)
-		a.errorPage(w)
+		a.errorPage(w, err.Error())
 		return
 	}
 

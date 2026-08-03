@@ -218,7 +218,7 @@ func TestSlowStreamIsDisconnectedRatherThanBlocked(t *testing.T) {
 	// close the stream instead of blocking the pump or dropping into
 	// silently stale delivery (D20).
 	for range sseBufferSize {
-		st.send(sseMsg{HydroID: "x", Patch: "<div></div>"})
+		st.send(sseFrame{event: "patch", data: `{"hydroId":"x","patch":"<div></div>"}`})
 	}
 	select {
 	case <-st.done:
@@ -226,7 +226,7 @@ func TestSlowStreamIsDisconnectedRatherThanBlocked(t *testing.T) {
 	default:
 	}
 
-	st.send(sseMsg{HydroID: "x", Patch: "<div></div>"})
+	st.send(sseFrame{event: "patch", data: `{"hydroId":"x","patch":"<div></div>"}`})
 
 	select {
 	case <-st.done:

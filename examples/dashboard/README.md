@@ -8,15 +8,26 @@ end-to-end.
 From the repo root:
 
 ```sh
+go run ./cmd/liquid dev examples/dashboard        # watch + rebuild + reload on http://localhost:8080
+```
+
+`liquid dev` compiles the `.lsx` templates, builds the app with the
+`liquiddev` tag (which adds the reload/overlay script to every page), and
+restarts it on every source change; a broken template renders the D13
+diagnostics as an in-browser overlay instead. (The overlay is served by the
+running app — if the very first build fails there is no app to host it yet,
+and the diagnostics appear in the terminal only.) To run without the dev
+loop:
+
+```sh
 go run ./cmd/liquid build examples/dashboard/ui   # compile the .lsx templates
 go run ./examples/dashboard                       # serve on http://localhost:8080
 ```
 
-The generated `ui/*_gen.go` files are committed, so the first command is only
+The generated `ui/*_gen.go` files are committed, so the build command is only
 needed after editing a `.lsx` template or a component struct
 (`cmd/liquid`'s `TestExampleDashboardBuildsCleanAndGenIsFresh` fails if they
-drift). `liquid dev` (watch + reload, ticket #12) is not built yet; rebuild
-and restart by hand for now.
+drift).
 
 ## What each card exercises
 

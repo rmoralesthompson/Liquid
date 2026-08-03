@@ -20,11 +20,20 @@ type sseMsg struct {
 	Patch   string `json:"patch"`
 }
 
+// sseFrame is one typed event on a stream: `patch` in every build, plus the
+// dev loop's `reload` and `diagnostics` in dev builds (D16 — dev events ride
+// the same stream as patches). data must be a single line; JSON encoding
+// guarantees that.
+type sseFrame struct {
+	event string
+	data  string
+}
+
 // sseStream is one open SSE connection. Senders never block on it and never
-// see it closed mid-send: patches go through the buffered channel, and
+// see it closed mid-send: frames go through the buffered channel, and
 // disconnecting means closing done — the channel itself is never closed.
 type sseStream struct {
-	ch   chan sseMsg
+	ch   chan sseFrame
 	done chan struct{}
 	once sync.Once
 }
@@ -36,7 +45,7 @@ type sseStream struct {
 const sseBufferSize = 16
 
 func newSSEStream() *sseStream {
-	return &sseStream{ch: make(chan sseMsg, sseBufferSize), done: make(chan struct{})}
+	return &sseStream{ch: make(chan sseFrame, sseBufferSize), done: make(chan struct{})}
 }
 
 // close disconnects the stream's reader. Idempotent — eviction, expiry, and
@@ -45,13 +54,13 @@ func (s *sseStream) close() {
 	s.once.Do(func() { close(s.done) })
 }
 
-// send queues one patch without ever blocking. A full buffer means the
+// send queues one frame without ever blocking. A full buffer means the
 // client is not keeping up; the stream is closed so the browser reconnects
-// into a full re-render of current state rather than reading stale patches
+// into a full re-render of current state rather than reading stale frames
 // (D20).
-func (s *sseStream) send(msg sseMsg) {
+func (s *sseStream) send(f sseFrame) {
 	select {
-	case s.ch <- msg:
+	case s.ch <- f:
 	case <-s.done:
 	default:
 		s.close()
@@ -95,9 +104,13 @@ func (a *App) startPump(sess *hydroSession, st *hydroState, hydroID string) (sto
 				a.logger.Error("rendering pushed patch", "hydroId", hydroID, "error", err)
 				continue
 			}
-			msg := sseMsg{HydroID: hydroID, Patch: patch}
+			frame, err := patchFrame(sseMsg{HydroID: hydroID, Patch: patch})
+			if err != nil {
+				a.logger.Error("encoding sse patch", "hydroId", hydroID, "error", err)
+				continue
+			}
 			for _, stream := range a.hydro.sessionStreams(sess) {
-				stream.send(msg)
+				stream.send(frame)
 			}
 		}
 	}()
@@ -171,10 +184,23 @@ func (h *hydroRegistry) detachStream(sessionID string, stream *sseStream) {
 	}
 }
 
+// patchFrame encodes a pushed patch as its typed stream frame. json.Marshal
+// escapes newlines, so the payload is one line — exactly what a data: field
+// carries.
+func patchFrame(msg sseMsg) (sseFrame, error) {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return sseFrame{}, fmt.Errorf("encoding sse patch: %w", err)
+	}
+	return sseFrame{event: "patch", data: string(data)}, nil
+}
+
 // serveHydroSSE holds one push stream open for the request's session: SSE
-// headers, then queued patches as `patch` events until the client goes away
-// or the server drops the stream (D3). A request without a live session has
-// nothing to stream and is refused.
+// headers, then queued frames as typed events until the client goes away or
+// the server drops the stream (D3). A request without a live session has
+// nothing to stream and is refused — except a dev build's ?dev=1 streams,
+// which exist to carry reload/diagnostics frames for any page, static ones
+// included (D16).
 func (a *App) serveHydroSSE(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -186,17 +212,25 @@ func (a *App) serveHydroSSE(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 		return
 	}
-	ck, err := r.Cookie(sessionCookieName)
-	if err != nil || ck.Value == "" {
-		http.NotFound(w, r)
-		return
-	}
+
 	stream := newSSEStream()
-	if !a.hydro.attachStream(ck.Value, stream, a.now(), a.limits.SessionIdleTimeout, a.limits.MaxStreamsPerSession) {
-		http.NotFound(w, r)
-		return
+	if devMode && r.URL.Query().Get("dev") == "1" {
+		// The dev script's stream: broadcaster-only, no session required, and
+		// never counted against the session's stream budget.
+		a.devAttachStream(stream)
+		defer a.devDetachStream(stream)
+	} else {
+		ck, err := r.Cookie(sessionCookieName)
+		if err != nil || ck.Value == "" {
+			http.NotFound(w, r)
+			return
+		}
+		if !a.hydro.attachStream(ck.Value, stream, a.now(), a.limits.SessionIdleTimeout, a.limits.MaxStreamsPerSession) {
+			http.NotFound(w, r)
+			return
+		}
+		defer a.hydro.detachStream(ck.Value, stream)
 	}
-	defer a.hydro.detachStream(ck.Value, stream)
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
@@ -209,15 +243,8 @@ func (a *App) serveHydroSSE(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-stream.done:
 			return
-		case msg := <-stream.ch:
-			data, err := json.Marshal(msg)
-			if err != nil {
-				a.logger.Error("encoding sse patch", "error", err)
-				continue
-			}
-			// json.Marshal escapes newlines, so the payload is one line —
-			// exactly what a data: field carries.
-			if _, err := fmt.Fprintf(w, "event: patch\ndata: %s\n\n", data); err != nil {
+		case f := <-stream.ch:
+			if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", f.event, f.data); err != nil {
 				return
 			}
 			fl.Flush()

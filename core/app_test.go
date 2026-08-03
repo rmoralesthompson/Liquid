@@ -285,6 +285,9 @@ func (f *failingInit) OnInit(ctx liquid.Ctx) error {
 }
 
 func TestOnInitErrorRendersFrameworkErrorPageWithoutLeaking(t *testing.T) {
+	if devBuild {
+		t.Skip("dev builds render the error detail on the page by design (D18 dev/prod split)")
+	}
 	var logs strings.Builder
 	app := liquid.New(liquid.WithLogger(slog.New(slog.NewTextHandler(&logs, nil))))
 	if err := app.Route("/", &failingInit{}); err != nil {
