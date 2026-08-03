@@ -1,5 +1,6 @@
 // Command liquid is the Liquid CLI: the AOT template compiler (build/vet),
-// the component scaffolder (generate), and the dev server (dev).
+// the component scaffolder (generate), the dev server (dev), and the
+// editor language server (lsp).
 package main
 
 import (
@@ -14,7 +15,7 @@ import (
 	"github.com/rmoralesthompson/liquid/cmd/liquid/internal/compiler"
 )
 
-const usage = "usage: liquid <build|vet|generate|dev> [args]"
+const usage = "usage: liquid <build|vet|generate|dev|lsp> [args]"
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout); err != nil {
@@ -37,6 +38,9 @@ func run(args []string, stdout io.Writer) error {
 	}
 	if verb == "dev" {
 		return runDev(args[1:], stdout)
+	}
+	if verb == "lsp" {
+		return runLSP(args[1:], os.Stdin, stdout)
 	}
 
 	dir, jsonOut, err := parseArgs(args[1:])

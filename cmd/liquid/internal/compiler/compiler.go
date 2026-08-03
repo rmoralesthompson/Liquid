@@ -6,7 +6,6 @@ package compiler
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"go/format"
 	"go/parser"
@@ -73,22 +72,10 @@ func eachLSX(dir string, fn func(path string) ([]Diagnostic, error)) ([]Diagnost
 // reference cross-check (LSX003, LSX004). It returns the raw template source
 // so compileFile can reuse it without a second read.
 func analyzeFile(ctx context.Context, lsxPath string) ([]Diagnostic, []byte, error) {
-	base := strings.TrimSuffix(lsxPath, ".lsx")
-	goPath := base + ".go"
-	structName := pascalCase(filepath.Base(base))
+	structName := PairedStructName(lsxPath)
 
-	if _, err := os.Stat(goPath); errors.Is(err, fs.ErrNotExist) {
-		return []Diagnostic{{
-			File:     lsxPath,
-			Line:     1,
-			Col:      1,
-			Severity: SeverityError,
-			Code:     CodeMissingPairedSource,
-			Message: fmt.Sprintf("no paired Go source file for %s: %s does not exist",
-				filepath.Base(lsxPath), filepath.Base(goPath)),
-			Suggestion: fmt.Sprintf("create %s defining a struct named %s",
-				filepath.Base(goPath), structName),
-		}}, nil, nil
+	if d := PairingDiagnostic(lsxPath); d != nil {
+		return []Diagnostic{*d}, nil, nil
 	}
 
 	src, err := os.ReadFile(lsxPath)

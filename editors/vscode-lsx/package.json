@@ -1,8 +1,8 @@
 {
   "name": "liquid-lsx",
   "displayName": "Liquid .lsx Templates",
-  "description": "Syntax highlighting for Liquid .lsx component templates: HTML plus {{ Field }} interpolation, *goIf/*goFor structural directives, (click)-style event bindings, and [hydroId]-style markers.",
-  "version": "0.1.0",
+  "description": "Language support for Liquid .lsx component templates: syntax highlighting plus live diagnostics, hover, completion, go-to-definition, and occurrence highlights via the liquid language server.",
+  "version": "0.2.0",
   "publisher": "rmoralesthompson",
   "license": "Apache-2.0",
   "repository": {
@@ -10,11 +10,18 @@
     "url": "https://github.com/rmoralesthompson/Liquid"
   },
   "engines": {
-    "vscode": "^1.75.0"
+    "vscode": "^1.82.0"
   },
   "categories": [
     "Programming Languages"
   ],
+  "main": "./client/extension.js",
+  "activationEvents": [
+    "onLanguage:lsx"
+  ],
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
   "contributes": {
     "languages": [
       {
@@ -49,6 +56,16 @@
           "text.html.lsx"
         ]
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Liquid LSX",
+      "properties": {
+        "liquid.lsx.serverPath": {
+          "type": "string",
+          "default": "liquid",
+          "description": "Path to the liquid CLI used to start the language server (liquid lsp). Leave as \"liquid\" to resolve from PATH."
+        }
+      }
+    }
   }
 }

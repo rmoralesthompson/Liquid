@@ -25,6 +25,11 @@ go.work.sum
 .claude/settings.local.json
 .claude/worktrees/
 
+# VS Code extension install artifacts
+editors/vscode-lsx/node_modules/
+editors/vscode-lsx/package-lock.json
+editors/vscode-lsx/*.vsix
+
 # Editor / OS noise
 .DS_Store
 .idea/
