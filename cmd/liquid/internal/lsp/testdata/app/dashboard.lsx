@@ -1,0 +1,9 @@
+<div [hydroId] class="dash">
+  <h1>{{ Title }}</h1>
+  <p *goIf="IsAdmin">admin</p>
+  <ul>
+    <li *goFor="let log of Logs">{{ $log }}</li>
+  </ul>
+  <button (click)="Refresh">Reload</button>
+  <app-stat-card [label]="Title"></app-stat-card>
+</div>

@@ -25,6 +25,15 @@ const maxSuggestionDistance = 2
 // resolves to a field or method on the paired struct. Expressions that are
 // not plain identifiers are left for html/template to judge.
 func vetReferences(ctx context.Context, dir, lsxPath, structName string, interps []structRef) ([]Diagnostic, error) {
+	facts, err := LoadFacts(ctx, dir)
+	if err != nil {
+		return nil, err
+	}
+	return facts.vetRefs(lsxPath, structName, interps), nil
+}
+
+// loadPackage loads and type-checks the single Go package in dir.
+func loadPackage(ctx context.Context, dir string) (*packages.Package, error) {
 	cfg := &packages.Config{
 		Context: ctx,
 		// NeedSyntax and NeedTypesInfo make packages type-check from source
@@ -42,9 +51,16 @@ func vetReferences(ctx context.Context, dir, lsxPath, structName string, interps
 	if len(pkgs) != 1 {
 		return nil, fmt.Errorf("loading package in %s: got %d packages, want exactly 1", dir, len(pkgs))
 	}
-	pkg := pkgs[0]
+	return pkgs[0], nil
+}
+
+// vetRefs runs the reference cross-check for one template against the
+// loaded package: broken package (LSX007), missing paired struct (LSX003),
+// then each reference's kind-specific rule.
+func (f *Facts) vetRefs(lsxPath, structName string, interps []structRef) []Diagnostic {
+	pkg := f.pkg
 	if len(pkg.Errors) > 0 {
-		return brokenPackageDiags(lsxPath, pkg.Errors), nil
+		return brokenPackageDiags(lsxPath, pkg.Errors)
 	}
 
 	base := filepath.Base(lsxPath)
@@ -60,7 +76,7 @@ func vetReferences(ctx context.Context, dir, lsxPath, structName string, interps
 				pkg.Types.Name(), structName, base),
 			Suggestion: fmt.Sprintf("define type %s struct in %s, or rename the files to match an existing struct",
 				structName, strings.TrimSuffix(base, ".lsx")+".go"),
-		}}, nil
+		}}
 	}
 
 	v := &vetter{lsxPath: lsxPath, structName: structName, pkg: pkg, pairedType: tn.Type()}
@@ -68,7 +84,7 @@ func vetReferences(ctx context.Context, dir, lsxPath, structName string, interps
 	for _, in := range interps {
 		diags = append(diags, v.check(in)...)
 	}
-	return diags, nil
+	return diags
 }
 
 // vetter cross-checks one template's references against its paired struct
@@ -393,21 +409,29 @@ func checkHandler(lsxPath, structName string, in structRef, member types.Object)
 		return d
 	}
 	sig := fn.Type().(*types.Signature)
-	if sig.Results().Len() == 0 {
-		switch sig.Params().Len() {
-		case 0:
-			return nil
-		case 1:
-			if isLiquidEvent(sig.Params().At(0).Type()) {
-				return nil
-			}
-		}
+	if isHandlerSig(sig) {
+		return nil
 	}
 	// Qualify types by bare package name so the signature reads as the
 	// author wrote it (liquid.Event), not as a full import path.
 	d.Message = fmt.Sprintf("%s handler %s has signature %s; a handler is func() or func(e liquid.Event) (D11)",
 		in.binding, in.expr, types.TypeString(fn.Type(), func(p *types.Package) string { return p.Name() }))
 	return d
+}
+
+// isHandlerSig reports whether sig is one of the two dispatchable handler
+// shapes D11 allows: func() or func(e liquid.Event).
+func isHandlerSig(sig *types.Signature) bool {
+	if sig.Results().Len() != 0 {
+		return false
+	}
+	switch sig.Params().Len() {
+	case 0:
+		return true
+	case 1:
+		return isLiquidEvent(sig.Params().At(0).Type())
+	}
+	return false
 }
 
 // liquidCorePath is the import path liquid.Event resolves at; handler
