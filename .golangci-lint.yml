@@ -13,6 +13,9 @@ linters:
     - contextcheck  # Verifies that context is correctly propagated
     - govet         # Standard Go verification tool (shadow variables, loops)
 
+    # Logging discipline
+    - forbidigo     # No fmt printing in core — logging goes through log/slog (D24)
+
     # Style, Naming & Structure
     - goconst       # Finds repeated strings that should be constants
     - gocyclo       # Checks code complexity (keeps functions short)
@@ -22,6 +25,14 @@ linters:
     - unused        # Finds unused code, variables, and constants
 
 linters-settings:
+  forbidigo:
+    forbid:
+      # D24: core logs via log/slog with a pluggable handler; stdout/stderr
+      # printing is forbidden there. Scoped to core/ by the exclude-rules
+      # entry below — CLI user output in cmd/liquid/ is legitimate.
+      - p: ^fmt\.Print(ln|f)?$
+        msg: core must log via log/slog (D24), not fmt printing
+
   govet:
     enable-all: true
     disable:
@@ -44,3 +55,9 @@ issues:
   exclude-use-default: false
   max-issues-per-linter: 0
   max-same-issues: 0
+  exclude-rules:
+    # forbidigo enforces D24's "no fmt.Println in core" — only there. The CLI
+    # prints to stdout/stderr by design, and examples are user-facing code.
+    - path-except: ^core/
+      linters:
+        - forbidigo
