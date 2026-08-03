@@ -12,6 +12,7 @@ Liquid is a server-driven UI framework for Go (Angular-style component model, Li
 
 - Build: `go build ./...`
 - Test: `go test -v -race ./...`
+- Dev-mode flavor: `go test -v -race -tags liquiddev ./core` (the `liquiddev` build tag compiles core's dev surface; `liquid dev` sets it when building apps)
 - Single test: `go test -v -run TestName ./...`
 - Format: `go fmt ./...`
 - Lint: `golangci-lint run` (config: `.golangci-lint.yml`)
