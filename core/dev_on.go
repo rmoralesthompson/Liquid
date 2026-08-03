@@ -7,8 +7,10 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"html/template"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -136,12 +138,27 @@ func (a *App) runDevControl(ctx context.Context, url string) {
 	}
 }
 
+// redactURLError strips the URL from a *url.Error (the shape url.Parse and
+// http.NewRequest return on a bad URL). The dev control URL's path is the
+// control-stream token, so its verbatim error must not reach the log sink;
+// the inner cause names the parse failure without the URL.
+func redactURLError(err error) error {
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		return ue.Err
+	}
+	return err
+}
+
 // relayDevControl holds one control connection, relaying frames until it
 // drops.
 func (a *App) relayDevControl(ctx context.Context, url string) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		a.logger.Error("building dev control request", "url", url, "error", err)
+		// The control URL's path IS the dev control credential (a crypto/rand
+		// token). request-building errors from url.Parse embed the raw URL, so
+		// log the redacted cause only — never the token (boundary 5).
+		a.logger.Error("building dev control request", "error", redactURLError(err))
 		return
 	}
 	resp, err := devControlClient.Do(req)
