@@ -192,3 +192,57 @@ func TestDevControlClientRelaysFramesToDevStreams(t *testing.T) {
 		t.Errorf("data = %q, want the relayed payload", data)
 	}
 }
+
+// TestDevOverlayScriptNeverUsesHTMLSinks pins dev.js's one XSS defense at
+// the source-text level (#34, THREAT-MODEL.md boundaries 3-4): the overlay
+// quotes untrusted .lsx/go-build text, and rendering it via textContent —
+// never an HTML sink — is the entire reason a hostile diagnostic cannot
+// script the dev origin. A browser-level inert-render check stays open on
+// #34; this pin at least fails loudly if an HTML sink sneaks into the blob.
+func TestDevOverlayScriptNeverUsesHTMLSinks(t *testing.T) {
+	script := string(devScriptJS)
+	if !strings.Contains(script, ".textContent") {
+		t.Error("dev.js no longer assigns via textContent — the overlay's XSS defense is gone")
+	}
+	for _, sink := range []string{"innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "createContextualFragment", "srcdoc", "DOMParser"} {
+		if strings.Contains(script, sink) {
+			t.Errorf("dev.js contains HTML sink %q — diagnostics text must stay inert (textContent only)", sink)
+		}
+	}
+}
+
+func TestDevBroadcasterIsBoundedWithOldestEviction(t *testing.T) {
+	app := New()
+	first := newSSEStream()
+	app.devAttachStream(first)
+	for range devMaxStreams - 1 {
+		app.devAttachStream(newSSEStream())
+	}
+	select {
+	case <-first.done:
+		t.Fatal("oldest stream closed before the cap was breached")
+	default:
+	}
+
+	// One past the cap: the broadcaster must stay bounded (CLAUDE.md
+	// invariant — every registry is bounded, dev surface included) by
+	// disconnecting the oldest stream, and the newcomer must be attached.
+	extra := newSSEStream()
+	app.devAttachStream(extra)
+
+	app.dev.mu.Lock()
+	n := len(app.dev.streams)
+	last := app.dev.streams[n-1]
+	app.dev.mu.Unlock()
+	if n != devMaxStreams {
+		t.Errorf("broadcaster holds %d streams after breaching the cap, want %d", n, devMaxStreams)
+	}
+	if last != extra {
+		t.Error("newest stream is not the one just attached — eviction dropped the wrong end")
+	}
+	select {
+	case <-first.done:
+	default:
+		t.Error("oldest stream left open at the cap; want it disconnected (oldest-evicted)")
+	}
+}
