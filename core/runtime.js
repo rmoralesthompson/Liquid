@@ -141,6 +141,27 @@
       );
       if (root) applyPatch(root, patch);
     });
+    // A deferred component's content arriving (#26): unlike a patch, this
+    // replaces the fallback slot element itself, so the component's own root
+    // (its attributes, id, classes) lands in the DOM. Thereafter it is an
+    // ordinary [data-hydro-id] boundary that patch frames re-render.
+    source.addEventListener("swap", (e) => {
+      const { hydroId, patch } = JSON.parse(e.data);
+      const slot = document.querySelector(
+        `[data-hydro-id="${CSS.escape(hydroId)}"]`,
+      );
+      if (!slot) return;
+      const tpl = document.createElement("template");
+      tpl.innerHTML = patch;
+      const next =
+        tpl.content.querySelector("[data-hydro-id]") ||
+        tpl.content.firstElementChild;
+      if (!next) {
+        console.error("liquid: swap carries no element to swap in", patch);
+        return;
+      }
+      slot.replaceWith(next);
+    });
   }
   connect();
 

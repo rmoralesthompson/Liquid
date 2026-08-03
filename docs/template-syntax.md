@@ -68,6 +68,29 @@ v0.1 supports `(click)` and `(submit)` (D12) — `(submit)` also exercises the `
 
 When a template contains another component's selector, the renderer instantiates a fresh child instance and copies the parent field named on the right (`SelectedUser`) into the child field matching the left name (`UserID`, case-insensitive match). Types must be assignable; a mismatch is a **build-time error**, not a silent skip.
 
+## Deferred rendering — `*liquidDefer`
+
+```html
+<app-slow-stats *liquidDefer [range]="Days"></app-slow-stats>
+```
+
+Marks a child occurrence as **deferred**: the page ships immediately with the element's body as a **fallback**, and the child's real content loads in a background goroutine and is **pushed over the session's SSE stream** when ready (#26). The child's own `OnInit` is the deferred work — the slow data load runs off the request path, so one slow source no longer blocks the whole page.
+
+```html
+<!-- author -->
+<app-slow-stats *liquidDefer [range]="Days">
+  <p>Loading your stats…</p>
+</app-slow-stats>
+```
+
+- **Opt-in per occurrence.** The directive sits on the child usage site, not the component. The same component renders inline or deferred depending on where it is used.
+- **Forces a hydro session.** A deferred occurrence pins an SSE stream onto the page even if nothing else on it is interactive — the completion patch needs somewhere to go.
+- **`HydroID` required.** The deferred component's struct must have a `HydroID string` field (the completion swaps at that boundary), enforced at build time (**LSX016**). It must sit on a child-selector element (**LSX015**) and takes no value (**LSX005**).
+- **`[input]` bindings** flow into the child exactly as for an inline occurrence; they are captured at render time.
+- **Error path.** If the deferred load fails, a generic message is patched into the slot (the failure detail is logged server-side, never shipped). Once loaded, the child is an ordinary live component — its event bindings dispatch and its subject subscriptions push updates.
+
+Compiles the occurrence to a fallback slot, `<div data-hydro-id="{{liquidDefer "app-slow-stats" "range" .Days}}">…fallback…</div>`; completion arrives as a `swap` SSE frame that replaces the slot with the child's rendered root, after which subscription updates are ordinary focus-preserving patches.
+
 ## Identity & infrastructure attributes
 
 | Syntax | Meaning |

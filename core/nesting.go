@@ -21,24 +21,41 @@ const maxNestingDepth = 32
 // `{{liquidChild "app-user-card" "name" .Owner}}`.
 const childFuncName = "liquidChild"
 
-// registrationStubFuncs makes templates referencing liquidChild parseable at
-// registration. The stub is never executed: a template that uses children is
-// re-parsed per render with the render scope's live child func attached.
+// deferFuncName is the template function a *liquidDefer occurrence compiles
+// to (#26): `<app-slow-stats *liquidDefer [range]="Days">` becomes the slot
+// `<div data-hydro-id="{{liquidDefer "app-slow-stats" "range" .Days}}">…`.
+// It mints the patch-boundary token, reserves the child's registry entry,
+// and spawns its background load — returning the token for the slot's
+// data-hydro-id.
+const deferFuncName = "liquidDefer"
+
+// registrationStubFuncs makes templates referencing the render-scope funcs
+// parseable at registration. The stubs are never executed: a template that
+// uses either is re-parsed per render with the render scope's live funcs
+// attached.
 var registrationStubFuncs = template.FuncMap{
 	childFuncName: func(string, ...any) (template.HTML, error) {
 		return "", errors.New("liquid: child render outside a render scope")
+	},
+	deferFuncName: func(string, ...any) (string, error) {
+		return "", errors.New("liquid: deferred render outside a render scope")
 	},
 }
 
 // renderScope is one render pass's context for resolving child components:
 // the App whose registry selectors resolve against, the session the render
 // binds to (established lazily — a purely static composition never mints
-// one), and the recursion depth.
+// one), the request context a deferred child's background load inherits, and
+// the recursion depth.
 type renderScope struct {
 	a *App
 	// ensure returns the render's session ID, establishing the session on
 	// first use.
 	ensure func() (string, error)
+	// reqCtx is the request whose params and session a deferred child's
+	// detached background load carries over (#26). Zero on a pushed re-render,
+	// where a deferred occurrence loads with a session-only context.
+	reqCtx Ctx
 	depth  int
 }
 
@@ -51,7 +68,10 @@ func (a *App) executeComponent(reg *registration, inst reflect.Value, sc *render
 	tmpl := reg.tmpl
 	if reg.hasChildren {
 		var err error
-		tmpl, err = template.New(reg.selector).Funcs(template.FuncMap{childFuncName: sc.child}).Parse(reg.tmplText)
+		tmpl, err = template.New(reg.selector).Funcs(template.FuncMap{
+			childFuncName: sc.child,
+			deferFuncName: sc.deferChild,
+		}).Parse(reg.tmplText)
 		if err != nil {
 			return "", fmt.Errorf("parsing template for %s: %w", reg.selector, err)
 		}
@@ -75,19 +95,9 @@ func (sc *renderScope) child(selector string, args ...any) (template.HTML, error
 	if !ok {
 		return "", fmt.Errorf("no component registered for selector %s; App.Register it before routing its parents", selector)
 	}
-	if len(args)%2 != 0 {
-		return "", fmt.Errorf("rendering %s: liquidChild takes (field, value) pairs, got %d arguments", selector, len(args))
-	}
-
 	inst := reg.newInstance()
-	for i := 0; i < len(args); i += 2 {
-		name, ok := args[i].(string)
-		if !ok {
-			return "", fmt.Errorf("rendering %s: liquidChild field name must be a string, got %T", selector, args[i])
-		}
-		if err := setChildInput(inst.Elem(), name, args[i+1]); err != nil {
-			return "", fmt.Errorf("rendering %s: %w", selector, err)
-		}
+	if err := applyChildInputs(inst.Elem(), selector, childFuncName, args); err != nil {
+		return "", err
 	}
 
 	// A child declaring its own [hydroId] gets its own session entry and
@@ -113,7 +123,7 @@ func (sc *renderScope) child(selector string, args ...any) (template.HTML, error
 			mintCSRF(sc.a.csrfSecret, sessionID, sc.a.limits.SessionIdleTimeout, sc.a.now()))
 	}
 
-	out, err := sc.a.executeComponent(reg, inst, &renderScope{a: sc.a, ensure: sc.ensure, depth: sc.depth + 1})
+	out, err := sc.a.executeComponent(reg, inst, &renderScope{a: sc.a, ensure: sc.ensure, reqCtx: sc.reqCtx, depth: sc.depth + 1})
 	if err != nil {
 		return "", fmt.Errorf("rendering child %s: %w", selector, err)
 	}
@@ -121,6 +131,26 @@ func (sc *renderScope) child(selector string, args ...any) (template.HTML, error
 		sc.a.registerHydro(sessionID, hydroID, inst, reg)
 	}
 	return template.HTML(out), nil
+}
+
+// applyChildInputs copies each [input]-bound (field, value) pair into the
+// fresh child instance. fn names the compiled template func (liquidChild or
+// liquidDefer) for the argument-shape error messages. Shared by inline and
+// deferred child rendering.
+func applyChildInputs(structV reflect.Value, selector, fn string, args []any) error {
+	if len(args)%2 != 0 {
+		return fmt.Errorf("rendering %s: %s takes (field, value) pairs, got %d arguments", selector, fn, len(args))
+	}
+	for i := 0; i < len(args); i += 2 {
+		name, ok := args[i].(string)
+		if !ok {
+			return fmt.Errorf("rendering %s: %s field name must be a string, got %T", selector, fn, args[i])
+		}
+		if err := setChildInput(structV, name, args[i+1]); err != nil {
+			return fmt.Errorf("rendering %s: %w", selector, err)
+		}
+	}
+	return nil
 }
 
 // setChildInput copies one [input]-bound value into the child field matching
@@ -150,12 +180,13 @@ func setChildInput(structV reflect.Value, name string, val any) error {
 	return nil
 }
 
-// usesLiquidChild reports whether a parsed template calls liquidChild
-// anywhere, deciding whether renders must re-parse against a live scope.
-func usesLiquidChild(n parse.Node) bool {
+// usesRenderScope reports whether a parsed template calls either render-scope
+// func (liquidChild or liquidDefer) anywhere, deciding whether renders must
+// re-parse against a live scope.
+func usesRenderScope(n parse.Node) bool {
 	switch n := n.(type) {
 	case *parse.IdentifierNode:
-		return n.Ident == childFuncName
+		return n.Ident == childFuncName || n.Ident == deferFuncName
 	case *parse.ListNode:
 		return listUses(n)
 	case *parse.ActionNode:
@@ -181,7 +212,7 @@ func pipeUses(p *parse.PipeNode) bool {
 	}
 	for _, cmd := range p.Cmds {
 		for _, arg := range cmd.Args {
-			if usesLiquidChild(arg) {
+			if usesRenderScope(arg) {
 				return true
 			}
 		}
@@ -195,7 +226,7 @@ func listUses(l *parse.ListNode) bool {
 		return false
 	}
 	for _, n := range l.Nodes {
-		if usesLiquidChild(n) {
+		if usesRenderScope(n) {
 			return true
 		}
 	}

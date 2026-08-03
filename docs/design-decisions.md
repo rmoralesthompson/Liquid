@@ -76,6 +76,14 @@ Both bind through the same compiler-generated allowlist (D10) and `liquid.Event`
 
 On a hydro event, the server re-renders the entire component subtree rooted at its `[hydroId]` element and returns it as one HTML blob; the runtime script swaps `innerHTML` at that boundary. Matches LiveView's own v1 approach — no diffing engine in v0.1 (per D9, no "faster" claim until it's measured against this baseline). Only a component that itself declares `[hydroId]` gets a session-registry entry (D2); a plain nested child re-renders for free as part of its interactive ancestor's subtree swap — no independent session/patch root unless it declares its own `[hydroId]`.
 
+**D14.1 — deferred rendering (`*liquidDefer`, #26).** A deferred child occurrence ships a fallback slot and loads in a session-registry-owned background goroutine, its content pushed when ready (template-syntax.md). Design points settled during implementation:
+
+- **One token, three roles.** `liquidDefer` mints a single token that is the slot's `data-hydro-id`, the child's `HydroID`, and its registry key — so the completed child is an ordinary live hydro instance (events dispatch, subscriptions push), not a special case.
+- **Deferred work = the child's `OnInit`,** run on a context *detached* from the request (the request's own context dies when the shell ships) and owned by the registry entry — cancelled on eviction/expiry like a subscription pump (D20), so a page cannot spawn unbounded background work and an in-flight load drops cleanly.
+- **Completion transport = a `swap` SSE frame.** `innerHTML` swap (D14) would drop the child's own root element, so completion instead replaces the fallback slot wholesale (`outerHTML`); *subsequent* subscription updates are ordinary focus-preserving patches at the now-present boundary.
+- **Dispatch safety (D20.1).** The entry is registered synchronously (counts against the per-session cap) but gated non-ready; `/hydro-event` misses the token until the load publishes under the dispatch mutex, so the background `OnInit` never races a dispatched handler.
+- **No performance claim** for the "ships at shell speed" pitch without a benchmark (D9) — the feature is described by behavior only.
+
 ### D15. Session & CSRF plumbing (O3): one session cookie, hydro tokens nested under it
 
 - **Cookie**: `liquid_session`, `HttpOnly` + `Secure` + `SameSite=Lax`, value is a cryptographically random opaque session ID — distinct from any individual component's `[hydroId]` token.
