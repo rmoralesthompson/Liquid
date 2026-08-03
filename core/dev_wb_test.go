@@ -4,9 +4,11 @@ package liquid
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -33,6 +35,32 @@ func newDevApp(t *testing.T) *App {
 		t.Fatalf("Route: %v", err)
 	}
 	return app
+}
+
+// TestDevControlErrorDoesNotLogTheToken pins the log-hygiene fix for #30's
+// F-1: the control URL's path is the dev control credential, and request
+// building can fail with a *url.Error whose text embeds the raw URL. The
+// error path must log the redacted cause only — never the token (boundary 5,
+// the last credential-to-log path after #32).
+func TestDevControlErrorDoesNotLogTheToken(t *testing.T) {
+	var logs bytes.Buffer
+	app := New(WithLogger(slog.New(slog.NewTextHandler(&logs, nil))))
+
+	// A control character in the path makes url.Parse (inside NewRequest)
+	// fail with a *url.Error carrying the full URL — the leak this guards.
+	// The value stands in for the crypto/rand control token; it is a fixed
+	// non-secret placeholder (gitleaks:allow — deliberately fake test input).
+	const token = "not-a-real-dev-control-token-placeholder" //gitleaks:allow
+	badURL := "http://127.0.0.1:65535/" + token + "\x7f"
+	app.relayDevControl(context.Background(), badURL)
+
+	got := logs.String()
+	if !strings.Contains(got, "building dev control request") {
+		t.Fatalf("expected the request-building error to be logged, got:\n%s", got)
+	}
+	if strings.Contains(got, token) {
+		t.Errorf("log output leaks the dev control token %q:\n%s", token, got)
+	}
 }
 
 func TestDevBuildServesTheOverlayScriptAndInjectsIt(t *testing.T) {

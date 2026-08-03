@@ -58,6 +58,26 @@
     return meta ? meta.content : "";
   }
 
+  // navigate performs a redirect answer's client-side navigation. The target
+  // is author-supplied and rides the envelope verbatim, so a javascript: or
+  // data: scheme would execute in this origin if handed straight to
+  // location.assign. Resolve it and navigate only to http(s): relative paths
+  // and absolute http(s) URLs (including cross-origin — an author redirect is
+  // trusted to that extent, D19) are allowed; a hostile scheme is dropped.
+  function navigate(target) {
+    let dest = null;
+    try {
+      dest = new URL(target, window.location.href);
+    } catch {
+      dest = null;
+    }
+    if (dest && (dest.protocol === "http:" || dest.protocol === "https:")) {
+      window.location.assign(dest.href);
+    } else {
+      console.error("liquid: refusing redirect to non-http(s) target", target);
+    }
+  }
+
   async function fire(root, action, payload) {
     const res = await fetch("/hydro-event", {
       method: "POST",
@@ -72,7 +92,7 @@
     if (!res.ok) return;
     const env = await res.json();
     if (env.redirect) {
-      window.location.assign(env.redirect);
+      navigate(env.redirect);
       return;
     }
     if (env.patch) applyPatch(root, env.patch);

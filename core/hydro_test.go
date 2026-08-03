@@ -636,6 +636,35 @@ func TestRuntimeScriptIsServedAsAStaticFile(t *testing.T) {
 	}
 }
 
+// TestRuntimeScriptGuardsRedirectScheme pins the redirect sink (#30): a
+// redirect answer is author-supplied and rides the envelope verbatim, so the
+// runtime must resolve the target and navigate only to http(s) — a
+// javascript:/data: scheme handed straight to location.assign would execute
+// in the page origin, turning the documented open-redirect (author
+// responsibility) into DOM XSS. Pinned by string presence per AR-2 (runtime.js
+// has no repeatable JS-level test); the negative assertion guards against a
+// regression back to the raw sink.
+func TestRuntimeScriptGuardsRedirectScheme(t *testing.T) {
+	srv := newServer(t, "/", &counter{})
+
+	_, body := get(t, srv.URL+"/liquid/runtime.js")
+
+	for _, want := range []string{
+		// The redirect goes through navigate(), which resolves the target and
+		// gates on protocol before assigning.
+		"function navigate(", "new URL(", "dest.protocol", `"http:"`, `"https:"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("runtime script missing redirect-scheme guard %q", want)
+		}
+	}
+	// The raw sink must never reappear: assigning the envelope value straight
+	// to location without the scheme gate is the exact regression this pins.
+	if strings.Contains(body, "assign(env.redirect)") {
+		t.Error("runtime script assigns env.redirect to location without the scheme guard")
+	}
+}
+
 func TestDocumentShellLoadsTheRuntimeScript(t *testing.T) {
 	srv := newServer(t, "/", &counter{})
 
