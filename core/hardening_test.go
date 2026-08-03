@@ -12,8 +12,9 @@ import (
 )
 
 // These tests are white-box for the same reason the CSRF codec's are: idle
-// expiry needs a controllable clock. Everything else about them stays at the
-// HTTP seam via ServeHTTP.
+// expiry needs a controllable clock, and the Limits defaulting contract lives
+// on an unexported method. Everything else about them stays at the HTTP seam
+// via ServeHTTP.
 
 // tickClock is a hand-advanced clock.
 type tickClock struct{ t time.Time }
@@ -150,4 +151,30 @@ func (h *hydroRegistry) sessionCount() int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return len(h.sessions)
+}
+
+func TestLimitsWithDefaultsClampsZeroAndNegative(t *testing.T) {
+	want := Limits{
+		MaxSessions:             DefaultMaxSessions,
+		MaxComponentsPerSession: DefaultMaxComponentsPerSession,
+		SessionIdleTimeout:      DefaultSessionIdleTimeout,
+		MaxEventBytes:           DefaultMaxEventBytes,
+		MaxStreamsPerSession:    DefaultMaxStreamsPerSession,
+	}
+	// "No unlimited setting" is the documented contract (D20): a zero field
+	// means its default, and a negative one must not slip through as
+	// unbounded either.
+	if got := (Limits{}).withDefaults(); got != want {
+		t.Errorf("zero Limits withDefaults = %+v, want %+v", got, want)
+	}
+	negative := Limits{
+		MaxSessions:             -1,
+		MaxComponentsPerSession: -1,
+		SessionIdleTimeout:      -1,
+		MaxEventBytes:           -1,
+		MaxStreamsPerSession:    -1,
+	}
+	if got := negative.withDefaults(); got != want {
+		t.Errorf("negative Limits withDefaults = %+v, want %+v", got, want)
+	}
 }
