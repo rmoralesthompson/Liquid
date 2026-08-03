@@ -16,6 +16,8 @@
 > redirect scheme gate); the #32–#35 gaps are all closed and their pins wired in above;
 > drifted citations were refreshed; one accepted risk was added (AR-8). The `#29` gap
 > markers that survive (AR-1..AR-7, open decisions 1–3) are re-affirmed, not re-opened.
+> (The three open decisions were subsequently settled on 2026-08-03 — see the settled
+> decisions section below and issues #45–#47.)
 
 ## How to read this
 
@@ -23,7 +25,8 @@ Each boundary section states the **attacker** (who is on the untrusted side), th
 **assets** they are after, the **controls** (mechanism → code → pinning test), and the
 **residual risk** (what the controls do not cover). Cross-cutting material — the
 prompt-injection posture, the recommended CSP, the invariant map, the regression
-checklist, open decisions, and accepted risks — follows the boundaries.
+checklist, the settled (formerly open) decisions, and accepted risks — follows the
+boundaries.
 
 Related documents: [architecture.md](architecture.md) §Security model,
 [design-decisions.md](design-decisions.md) (D2, D10, D13, D15, D18–D20, D24),
@@ -317,25 +320,34 @@ Each known defect from the original design material, mapped to what keeps it fix
 
 ---
 
-## Open decisions (need the human — cited, not re-litigated)
+## Formerly open decisions — settled 2026-08-03 (D15 amended)
+
+All three were decided by the maintainer and D15 amended accordingly; each has an
+implementation ticket. Until those tickets land, the code reflects the *pre-decision*
+behavior described below — the "risk" text stays accurate as a description of the gap
+being closed.
 
 1. **CSRF token embeds the raw session ID, and the token is stamped into the DOM**
    (`liquid-csrf` meta + hidden inputs). Injected script could read the HttpOnly
-   cookie's *value* via the token, undermining HttpOnly's point. A signature-only
-   encoding (session recovered server-side from the cookie) would fix it — but D15 fixed
-   the format. Recorded on [#9](https://github.com/rmoralesthompson/Liquid/issues/9);
-   needs a D15 amendment decision.
+   cookie's *value* via the token, undermining HttpOnly's point. **Decided
+   ([#45](https://github.com/rmoralesthompson/Liquid/issues/45)): signature-only
+   encoding** — the token carries `expiry:signature` only; the server recovers the
+   session ID from the request's cookie. Originally recorded on
+   [#9](https://github.com/rmoralesthompson/Liquid/issues/9).
 2. **CSRF expiry is fixed at render time while the session idle window slides** (#9's
    second observation): a page dispatching events for longer than the idle window keeps
-   its session alive but starts getting 403s at the token's fixed expiry. The fix —
-   re-minting tokens in patch envelopes — changes D15's rotation policy. Recorded on
-   [#9](https://github.com/rmoralesthompson/Liquid/issues/9).
+   its session alive but starts getting 403s at the token's fixed expiry. **Decided
+   ([#46](https://github.com/rmoralesthompson/Liquid/issues/46)): re-mint the token in
+   every patch envelope**, with the runtime refreshing the meta tag and hidden inputs —
+   token lifetime follows the session's sliding deadline.
 3. **`Secure` cookie vs `http://localhost` dev serving** (D15): the cookie is always set
    `Secure` (`core/hydro.go:367`). Modern browsers treat `localhost` as a trustworthy
    origin and accept it, so `liquid dev` works; but any plain-HTTP **non-localhost**
-   deployment silently loses the cookie and with it all interactivity. Secure-by-default
-   is the right posture; whether to warn (log once when serving non-TLS off-localhost)
-   or to add an explicit dev override is a human call.
+   deployment silently loses the cookie and with it all interactivity. **Decided
+   ([#47](https://github.com/rmoralesthompson/Liquid/issues/47)): warn-once log** —
+   `Secure` stays unconditional with no override knob; the session-mint path logs a
+   single warning when serving plain HTTP off a non-localhost `Host` (wording notes the
+   TLS-terminating-proxy false positive).
 
 ## Accepted risks
 
