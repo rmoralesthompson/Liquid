@@ -59,6 +59,13 @@ const (
 	// child-selector element, which the child's render replaces wholesale —
 	// such bindings belong inside the child's own template.
 	CodeChildBindingUnsupported Code = "LSX014"
+	// CodeMisplacedDefer reports *liquidDefer off a child-selector element:
+	// only a nested component occurrence can render deferred (D14).
+	CodeMisplacedDefer Code = "LSX015"
+	// CodeMissingDeferHydroField reports *liquidDefer on a component whose
+	// struct lacks the HydroID string field — without it the completion
+	// patch has no boundary to swap at.
+	CodeMissingDeferHydroField Code = "LSX016"
 )
 
 // Diagnostic is one structured compiler finding: the literal contract an

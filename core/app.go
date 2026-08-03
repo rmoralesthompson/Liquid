@@ -44,7 +44,7 @@ type registration struct {
 	hydroField  int               // index of the HydroID field; -1 when not interactive
 	csrfField   int               // index of the CSRFToken field; -1 when the component has none
 	actions     map[string]action // allowlisted action → dispatch shape, resolved at registration (D10)
-	hasChildren bool              // template nests child selectors; renders bind liquidChild to a scope
+	hasChildren bool              // template nests child selectors or defers one; renders bind liquidChild/liquidDefer to a scope
 }
 
 // newInstance returns a fresh component instance seeded from the prototype
@@ -272,7 +272,7 @@ func (a *App) register(c Component) (*registration, error) {
 		hydroField:  hydroIDField(v.Elem().Type()),
 		csrfField:   csrfTokenField(v.Elem().Type()),
 		actions:     actions,
-		hasChildren: tmpl.Tree != nil && usesLiquidChild(tmpl.Tree.Root),
+		hasChildren: tmpl.Tree != nil && usesRenderScope(tmpl.Tree.Root),
 	}
 	if a.components == nil {
 		a.components = make(map[string]*registration)
@@ -432,7 +432,7 @@ func (a *App) registerHydro(sessionID, hydroID string, inst reflect.Value, reg *
 	if sp, ok := inst.Interface().(SubscriptionProvider); ok {
 		subs = sp.Subscriptions()
 	}
-	st := &hydroState{inst: inst, reg: reg, subs: subs}
+	st := &hydroState{inst: inst, reg: reg, subs: subs, ready: true}
 	sess := a.hydro.put(sessionID, hydroID, st, a.now(), a.limits)
 	if len(subs) == 0 {
 		return
@@ -540,7 +540,7 @@ func (a *App) renderRoute(w http.ResponseWriter, r *http.Request, rt *route, par
 		}
 	}
 
-	body, err := a.executeComponent(reg, inst, &renderScope{a: a, ensure: ensure})
+	body, err := a.executeComponent(reg, inst, &renderScope{a: a, ensure: ensure, reqCtx: ctx})
 	if err != nil {
 		a.logger.Error("rendering component", "path", r.URL.Path, "error", err)
 		a.errorPage(w, err.Error())

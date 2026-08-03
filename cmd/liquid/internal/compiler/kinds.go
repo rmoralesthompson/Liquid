@@ -74,6 +74,18 @@ var directiveKinds = []directiveKind{
 		lowered:   "<form>",
 		ref:       csrfRootRef,
 	},
+	{
+		// *liquidDefer marks a child occurrence as deferred: the usage site
+		// compiles to a fallback slot and the child renders in the
+		// background, patched in over SSE (#26). Legal only on a
+		// child-selector element (LSX015, checked tag-contextually in
+		// checkDirectives, like LSX014); its vet ref is likewise
+		// tag-contextual, emitted by directiveRefs.
+		canonical: "*liquidDefer",
+		lowered:   "*liquiddefer",
+		check:     checkLiquidDeferExpr,
+		rewrite:   rewriteStripAttr,
+	},
 }
 
 // kindByCanonical resolves a directive's author-facing name to its kind.
@@ -172,6 +184,25 @@ func hydroRootRef(d directive) (structRef, bool) {
 // anchored at the <form> tag itself.
 func csrfRootRef(d directive) (structRef, bool) {
 	return structRef{pos: d.namePos, kind: refCSRFRoot}, true
+}
+
+// checkLiquidDeferExpr rejects a *liquidDefer carrying a value: the
+// directive is a marker, not an expression.
+func checkLiquidDeferExpr(file string, d directive) *Diagnostic {
+	if d.expr == "" {
+		return nil
+	}
+	return malformedDirective(file, d,
+		fmt.Sprintf("*liquidDefer takes no expression, got %q", d.expr),
+		"write the bare attribute: <app-stats *liquidDefer>")
+}
+
+// rewriteStripAttr deletes the attribute without rewriting anything — for
+// kinds whose transform is element-level (a *liquidDefer occurrence is
+// rewritten wholesale by rewriteDeferredChild before bindings apply).
+func rewriteStripAttr(n *html.Node, i int, _ *[]string) error {
+	n.Attr = append(n.Attr[:i], n.Attr[i+1:]...)
+	return nil
 }
 
 // rewriteGoIf wraps the element in the {{if}} block its condition compiles

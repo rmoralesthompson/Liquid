@@ -57,6 +57,13 @@ type hydroState struct {
 	// dispatch mutex, so a handler that emits to a subject it observes sees
 	// the emission in its own response patch.
 	subs []Subscription
+	// ready reports whether the instance may be dispatched against. True from
+	// registration for an inline instance; a deferred instance (#26) starts
+	// false and its background load flips it true — under the session's
+	// dispatch mutex, at the same instant it becomes live — so the load never
+	// mutates the instance concurrently with a dispatched handler (D20.1).
+	// Read and written only under the owning session's dispatch mutex.
+	ready bool
 }
 
 // renderStateLocked applies the instance's subject bindings and renders it —
@@ -506,6 +513,14 @@ func (a *App) serveHydroEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sess.dispatch.Lock()
+	// A deferred instance whose background load has not published yet is not
+	// live: its OnInit is still mutating it off-mutex, so dispatching now
+	// would race that write (D20.1). It reads as absent until ready.
+	if !st.ready {
+		sess.dispatch.Unlock()
+		http.NotFound(w, r)
+		return
+	}
 	st.inst.Method(act.idx).Call(args)
 	env := Envelope{Redirect: reply.redirect}
 	var renderErr error

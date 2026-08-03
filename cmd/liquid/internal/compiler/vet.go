@@ -116,6 +116,8 @@ func (v *vetter) check(in structRef) []Diagnostic {
 		return oneDiag(checkHydroField(v.lsxPath, v.structName, in, v.pairedType, v.pkg.Types))
 	case refCSRFRoot:
 		return oneDiag(checkCSRFField(v.lsxPath, v.structName, in, v.pairedType, v.pkg.Types))
+	case refDefer:
+		return v.checkDeferTarget(in)
 	default:
 		return v.checkFieldRef(in)
 	}
@@ -161,6 +163,33 @@ func unknownReferenceDiag(lsxPath, structName, name string, at pos, pairedType t
 		Message:    fmt.Sprintf("%s has no field or method named %s", structName, name),
 		Suggestion: suggestion,
 	}
+}
+
+// checkDeferTarget verifies a deferred component carries the HydroID field
+// its completion patch swaps at (LSX016). An unknown selector yields nothing
+// here — its element already carries the LSX012.
+func (v *vetter) checkDeferTarget(in structRef) []Diagnostic {
+	childName, ok := v.selectorTable()[in.sel]
+	if !ok {
+		return nil
+	}
+	childTN, ok := v.pkg.Types.Scope().Lookup(childName).(*types.TypeName)
+	if !ok {
+		return nil
+	}
+	if hasStringField(childTN.Type(), v.pkg.Types, "HydroID") {
+		return nil
+	}
+	return []Diagnostic{{
+		File:     v.lsxPath,
+		Line:     in.line,
+		Col:      in.col,
+		Severity: SeverityError,
+		Code:     CodeMissingDeferHydroField,
+		Message: fmt.Sprintf("%s is deferred but %s has no HydroID string field for the swap to target",
+			in.sel, childName),
+		Suggestion: fmt.Sprintf("add HydroID string to the %s struct", childName),
+	}}
 }
 
 // checkInputBinding verifies one [input] binding end to end: the expression

@@ -1,0 +1,6 @@
+<section class="metrics">
+  <h1>{{ Title }}</h1>
+  <app-slow-stats *liquidDefer [range]="Days">
+    <p>Loading {{ Title }}…</p>
+  </app-slow-stats>
+</section>

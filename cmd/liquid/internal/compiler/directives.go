@@ -293,6 +293,12 @@ func checkDirectives(file string, dirs []directive) []Diagnostic {
 			diags = append(diags, childBindingDiag(file, d, sel))
 			continue
 		}
+		if d.name == "*liquidDefer" {
+			if _, onChild := childTags[d.tag]; !onChild {
+				diags = append(diags, misplacedDeferDiag(file, d))
+				continue
+			}
+		}
 		if k.check == nil {
 			continue
 		}
@@ -318,6 +324,20 @@ func childBindingDiag(file string, d directive, sel string) Diagnostic {
 		Message: fmt.Sprintf("%s cannot bind on the child selector %s; the element is replaced by the child's own render",
 			d.name, sel),
 		Suggestion: fmt.Sprintf("move the %s into the %s component's own template", d.name, sel),
+	}
+}
+
+// misplacedDeferDiag builds the LSX015 for *liquidDefer on anything that is
+// not a child-selector element.
+func misplacedDeferDiag(file string, d directive) Diagnostic {
+	return Diagnostic{
+		File:       file,
+		Line:       d.namePos.line,
+		Col:        d.namePos.col,
+		Severity:   SeverityError,
+		Code:       CodeMisplacedDefer,
+		Message:    "*liquidDefer must sit on a child-selector element; only a nested component occurrence can render deferred",
+		Suggestion: "defer a nested component usage such as <app-stats *liquidDefer>, not a plain element",
 	}
 }
 
@@ -417,13 +437,21 @@ func isFieldPath(s string) bool {
 // kind's ref extractor deciding what there is to check.
 func directiveRefs(dirs []directive) []structRef {
 	var refs []structRef
+	childTags := make(map[int]string) // tag ordinal → child selector
 	for _, d := range dirs {
 		switch d.name {
 		case kindChildTag:
+			childTags[d.tag] = d.sel
 			refs = append(refs, structRef{expr: d.expr, pos: d.pos, kind: refChildTag})
 			continue
 		case kindInput:
 			refs = append(refs, structRef{expr: d.expr, pos: d.pos, kind: refInput, binding: d.attr, sel: d.sel, namePos: d.namePos})
+			continue
+		}
+		if d.name == "*liquidDefer" {
+			if sel, onChild := childTags[d.tag]; onChild {
+				refs = append(refs, structRef{pos: d.namePos, kind: refDefer, sel: sel})
+			}
 			continue
 		}
 		k := kindByCanonical(d.name)

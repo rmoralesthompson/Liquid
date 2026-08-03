@@ -20,14 +20,22 @@ type sseMsg struct {
 	Patch   string `json:"patch"`
 }
 
-// sseFrame is one typed event on a stream: `patch` in every build, plus the
-// dev loop's `reload` and `diagnostics` in dev builds (D16 — dev events ride
-// the same stream as patches). data must be a single line; JSON encoding
-// guarantees that.
+// sseFrame is one typed event on a stream: `patch` and `swap` in every
+// build, plus the dev loop's `reload` and `diagnostics` in dev builds (D16 —
+// dev events ride the same stream as patches). data must be a single line;
+// JSON encoding guarantees that.
 type sseFrame struct {
 	event string
 	data  string
 }
+
+// The two push-frame event names carried in every build: a patch re-renders
+// a boundary's inner HTML, a swap replaces a deferred component's fallback
+// slot element wholesale (#26).
+const (
+	frameEventPatch = "patch"
+	frameEventSwap  = "swap"
+)
 
 // sseStream is one open SSE connection. Senders never block on it and never
 // see it closed mid-send: frames go through the buffered channel, and
@@ -200,11 +208,26 @@ func (h *hydroRegistry) detachStream(sessionID string, stream *sseStream) {
 // escapes newlines, so the payload is one line — exactly what a data: field
 // carries.
 func patchFrame(msg sseMsg) (sseFrame, error) {
+	return encodeFrame(frameEventPatch, msg)
+}
+
+// swapFrame encodes a deferred component's completion as a `swap` frame: the
+// runtime replaces the fallback slot element wholesale (outerHTML) with the
+// pushed component root, so the child's own root element and its attributes
+// land in the DOM — unlike a `patch`, which swaps only the boundary's inner
+// HTML (#26). Later re-renders of the now-present boundary are ordinary
+// patches.
+func swapFrame(msg sseMsg) (sseFrame, error) {
+	return encodeFrame(frameEventSwap, msg)
+}
+
+// encodeFrame marshals a pushed message as a typed stream frame.
+func encodeFrame(event string, msg sseMsg) (sseFrame, error) {
 	data, err := json.Marshal(msg)
 	if err != nil {
-		return sseFrame{}, fmt.Errorf("encoding sse patch: %w", err)
+		return sseFrame{}, fmt.Errorf("encoding sse %s: %w", event, err)
 	}
-	return sseFrame{event: "patch", data: string(data)}, nil
+	return sseFrame{event: event, data: string(data)}, nil
 }
 
 // serveHydroSSE holds one push stream open for the request's session: SSE
