@@ -201,6 +201,10 @@ func transform(n *html.Node, actions *[]string) error {
 			return err
 		}
 		if isChildSelector(n) {
+			if hasDeferAttr(n) {
+				rewriteDeferredChild(n)
+				return nil
+			}
 			rewriteChildSelector(n)
 			return nil
 		}
@@ -268,6 +272,65 @@ func rewriteChildSelector(n *html.Node) {
 	for n.FirstChild != nil {
 		n.RemoveChild(n.FirstChild)
 	}
+}
+
+// deferAttrKey is the HTML-parser spelling of *liquidDefer.
+const deferAttrKey = "*liquiddefer"
+
+// hasDeferAttr reports whether a child-selector element is marked
+// *liquidDefer.
+func hasDeferAttr(n *html.Node) bool {
+	for _, a := range n.Attr {
+		if a.Key == deferAttrKey {
+			return true
+		}
+	}
+	return false
+}
+
+// rewriteDeferredChild replaces a deferred child occurrence with its slot:
+// a div whose data-hydro-id the liquidDefer call mints at render, holding
+// the element's body as the fallback until the deferred render is patched
+// in (#26). The element itself becomes the slot's opening RawNode (the call
+// carries quotes an attribute value would entity-escape) and the fallback
+// children move up to siblings before the closing RawNode — still ahead of
+// the transform walk, so fallback content is rewritten like any template
+// content.
+func rewriteDeferredChild(n *html.Node) {
+	var call strings.Builder
+	fmt.Fprintf(&call, "{{liquidDefer %q", n.Data)
+	for _, a := range n.Attr {
+		name, ok := inputBindingName(a.Key)
+		if !ok {
+			continue
+		}
+		fmt.Fprintf(&call, " %q %s", name, fieldRef(a.Val))
+	}
+	call.WriteString("}}")
+
+	var fallback []*html.Node
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		fallback = append(fallback, c)
+	}
+	for _, c := range fallback {
+		n.RemoveChild(c)
+	}
+	n.Type = html.RawNode
+	n.Data = `<div data-hydro-id="` + call.String() + `">`
+	n.DataAtom = 0
+	n.Attr = nil
+	ref := n.NextSibling
+	insert := func(node *html.Node) {
+		if ref != nil {
+			n.Parent.InsertBefore(node, ref)
+		} else {
+			n.Parent.AppendChild(node)
+		}
+	}
+	for _, c := range fallback {
+		insert(c)
+	}
+	insert(&html.Node{Type: html.RawNode, Data: "</div>"})
 }
 
 // inputBindingName extracts the child field name from an [input] binding

@@ -1,0 +1,3 @@
+<section>
+  <app-late-card *liquidDefer="Nope">Loading…</app-late-card>
+</section>

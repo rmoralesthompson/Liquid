@@ -1,0 +1,3 @@
+<section>
+  <app-plain-card *liquidDefer>Loading…</app-plain-card>
+</section>

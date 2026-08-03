@@ -29,6 +29,10 @@ const (
 	// expression references the parent struct, and the bound name must be an
 	// assignable field on the child struct.
 	refInput
+	// refDefer is a *liquidDefer on a child-selector element, which requires
+	// the deferred component to carry the HydroID string field its
+	// completion patch swaps at.
+	refDefer
 )
 
 // pos is a position in raw .lsx source: 1-based line, 1-based byte column,
