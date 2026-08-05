@@ -39,7 +39,7 @@ func (sc *renderScope) deferChild(selector string, args ...any) (string, error) 
 	if err != nil {
 		return "", fmt.Errorf("deferring %s: establishing session: %w", selector, err)
 	}
-	token, err := randomToken()
+	token, err := sc.a.newToken()
 	if err != nil {
 		return "", fmt.Errorf("deferring %s: %w", selector, err)
 	}

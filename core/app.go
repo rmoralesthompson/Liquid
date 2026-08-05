@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -29,7 +30,8 @@ type App struct {
 	hydro      hydroRegistry            // live interactive instances (D15)
 	csrfSecret []byte                   // HMAC key for CSRF tokens, minted per process (D15)
 	limits     Limits                   // registry and request bounds, defaults applied (D20)
-	now        func() time.Time         // the App's clock; replaceable in tests for idle-expiry control
+	now        func() time.Time         // the App's clock; crypto real time in prod, pinnable in tests for idle-expiry and deterministic-render control (D28)
+	rand       io.Reader                // opaque-token CSPRNG source (D15); crypto/rand.Reader in every build, replaceable only in-package for deterministic render (D28)
 	dev        devState                 // dev-build broadcaster (D16); an empty struct in production builds
 
 	insecureWarn sync.Once // fires the plain-HTTP-non-localhost Secure-cookie warning at most once (#47)
@@ -164,21 +166,26 @@ func WithLimits(l Limits) Option {
 
 // New creates an App, applying any options.
 func New(opts ...Option) *App {
-	secret := make([]byte, 32)
-	if _, err := rand.Read(secret); err != nil {
-		// No entropy at construction is unrecoverable and must not fall
-		// through to serving unsigned tokens.
-		panic(fmt.Sprintf("liquid: generating CSRF secret: %v", err))
-	}
 	a := &App{
-		logger:     slog.Default(),
-		csrfSecret: secret,
-		limits:     Limits{}.withDefaults(),
-		now:        time.Now,
+		logger: slog.Default(),
+		limits: Limits{}.withDefaults(),
+		now:    time.Now,
+		rand:   rand.Reader,
 	}
 	for _, opt := range opts {
 		opt(a)
 	}
+	// The CSRF secret is drawn from the App's token source after options
+	// apply, so a deterministic-render build (D28) that swapped the source
+	// gets a reproducible secret too — production keeps crypto/rand.Reader,
+	// unchanged from a direct rand.Read.
+	secret := make([]byte, 32)
+	if _, err := io.ReadFull(a.rand, secret); err != nil {
+		// No entropy at construction is unrecoverable and must not fall
+		// through to serving unsigned tokens.
+		panic(fmt.Sprintf("liquid: generating CSRF secret: %v", err))
+	}
+	a.csrfSecret = secret
 	a.initDev()
 	return a
 }
@@ -453,7 +460,7 @@ func (a *App) registerHydro(sessionID, hydroID string, inst reflect.Value, reg *
 // the render's CSRF token (D15).
 func (a *App) mintRenderTokens(w http.ResponseWriter, r *http.Request, reg *registration) (sessionID, hydroID, csrf string, err error) {
 	if sessionID, err = a.ensureSession(w, r); err == nil && reg.hydroField >= 0 {
-		hydroID, err = randomToken()
+		hydroID, err = a.newToken()
 	}
 	if err != nil {
 		return "", "", "", err

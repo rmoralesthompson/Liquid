@@ -2,12 +2,12 @@ package liquid
 
 import (
 	"container/list"
-	"crypto/rand"
 	_ "embed"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"reflect"
@@ -345,11 +345,14 @@ func (h *hydroRegistry) touch(sessionID string, now time.Time, idle time.Duratio
 	return h.touchSession(sessionID, now, idle) != nil
 }
 
-// randomToken returns a cryptographically random opaque token. Tokens carry
-// no meaning — never a memory address or anything derived from one.
-func randomToken() (string, error) {
+// newToken returns a cryptographically random opaque token drawn from the
+// App's CSPRNG source (a.rand, crypto/rand.Reader in every real build).
+// Tokens carry no meaning — never a memory address or anything derived from
+// one (D15). The source is an injectable seam so a deterministic-render build
+// can pin it (D28); production never reaches that seam.
+func (a *App) newToken() (string, error) {
 	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
+	if _, err := io.ReadFull(a.rand, b); err != nil {
 		return "", fmt.Errorf("generating random token: %w", err)
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
@@ -364,7 +367,7 @@ func (a *App) ensureSession(w http.ResponseWriter, r *http.Request) (string, err
 	if ck, err := r.Cookie(sessionCookieName); err == nil && ck.Value != "" && a.hydro.touch(ck.Value, a.now(), a.limits.SessionIdleTimeout) {
 		return ck.Value, nil
 	}
-	id, err := randomToken()
+	id, err := a.newToken()
 	if err != nil {
 		return "", fmt.Errorf("minting session ID: %w", err)
 	}
