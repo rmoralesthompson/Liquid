@@ -1,6 +1,6 @@
 # Liquid — Design Decisions
 
-Decision log for the framework. All decisions (D1–D24) are settled and binding unless explicitly revisited.
+Decision log for the framework. Decisions D1–D24 are settled and binding unless explicitly revisited; proposed drafts (D25+) live under **Proposed** at the bottom and are not binding until accepted.
 
 **D1–D9 accepted 2026-08-02; D10–D17 accepted 2026-08-02; D18–D24 accepted 2026-08-02** (owner: Richard).
 
@@ -141,4 +141,90 @@ Minimal harness — render a component to HTML, query it, fire an allowlisted ac
 
 ---
 
-**All design decisions are settled (D1–D24). See [HANDOFF.md](HANDOFF.md) for current state and build order.**
+## Proposed (not yet accepted)
+
+Entries below are drafts awaiting owner sign-off. They are **not binding** and may be revised or rejected. Do not build against them until moved to **Settled** with an acceptance date.
+
+### D25. Derived reactive state: stream combinators over `BehaviorSubject[T]`
+
+**Problem.** `BehaviorSubject[T]` (architecture.md §State & reactivity) gives a single observable value with `Next`/`Subscribe`/`Value`, and SSE (D3) pushes its emissions. That is enough for *one* live value but not for a dashboard, which is overwhelmingly **derived** state: totals, quantiles, and filtered rollups that recompute when an upstream source *or* a user-controlled filter changes. Today each derived tile must hand-roll a goroutine that subscribes to N upstreams, recomputes on every `Next`, pushes into its own subject, and **unsubscribes on session GC**. That last step is the leak hazard architecture.md §90 and the CLAUDE.md bounded-registry invariant explicitly warn about — and it is the most repetitive, highest-risk code in any generated dashboard. Making the *generator* (agent or human) responsible for subscription lifecycle per tile is the wrong boundary.
+
+**Decision.** Add a small combinator layer over the existing subject whose subscription lifecycle is owned by the framework, registered against the session's unsubscribe-on-GC hook (D2/D20) so generated code never manages it:
+
+```go
+total    := liquid.Map(orders, sum)                          // 1→1 projection
+p95      := liquid.CombineLatest(latencies, window, p95Of)   // recompute when EITHER input changes
+metrics  := liquid.Interval(ctx, 5*time.Second, fetch)       // poll source as a stream
+smoothed := liquid.Throttle(metrics, 250*time.Millisecond)   // backpressure for chatty sources
+```
+
+- **`CombineLatest`** is load-bearing: it is what lets one filter control (date range, environment selector) fan out to every dependent tile without the author wiring N→M subscriptions by hand.
+- **`Interval`/poll + `Throttle`** cover the other dashboard reality — most tiles are periodic pulls, and not every tick should become an SSE patch.
+- Derived subjects are read/subscribed exactly like a `BehaviorSubject[T]`, so they compose with server push (D3), patch swaps (D14), and DI-registered app-lifetime subjects (architecture.md §99) with **no wire-format or transport change**.
+
+**Scope & non-goals.**
+- v0.1 combinator set is intentionally minimal (`Map`, `CombineLatest`, `Interval`, `Throttle`); a broader operator library is deferred until concrete need, per the D8/D4 "add when a real case appears" stance.
+- A template-level `@poll(5s)` / data-source directive in `.lsx` is explicitly **out of scope here** but the combinators are designed so it can layer on as thin sugar later (consistent with D1's compiler-driven approach) — this decision does not foreclose it.
+- **Not** a diffing/reconciliation engine — derived emissions still trigger a whole-`[hydroId]` subtree swap (D14). Combinators change *how derived values are computed*, not *how patches are applied*.
+- Charts/visualization primitives are **not** in scope and are a deliberate non-goal (a userland/component-library concern, not framework-shaped — see the frontier note below).
+
+**Rationale.** Composes with what exists (same subject, same SSE, same GC hook) at low architectural cost, and moves the leak-prone subscription lifecycle behind the framework boundary — the single biggest reliability win for agent-generated reactive views specifically.
+
+### D26. Machine-readable component/action manifest: `liquid manifest --json`
+
+**Problem.** The AOT compiler already resolves, for every component, its paired struct fields (D1 `vet` via `go/types`), its `[input]` bindings (D4 nesting), and its compile-time action allowlist (D10). An agent composing a view has no way to read that ground truth except by parsing source — the one thing the compiler exists to avoid re-doing per request (D1). D13 gives an agent a contract for *fixing what it broke*; there is no equivalent contract for *discovering what already exists to compose*.
+
+**Decision.** Add `liquid manifest` emitting a stable JSON graph of the compiled app: for each component, its selector, source file, struct fields (name/type/`[input]`-ness), allowlisted actions with their D11 signatures (`func()` vs `func(liquid.Event)`), declared `[hydroId]` roots, and `Head()`/route associations where known. Text output is the default (consistent with D13); `--json` is the agent contract.
+
+- **The field names are the API** — same stance as D13. Richness is secondary to a stable, machine-matchable shape.
+- Derived from data the compiler already holds at `build`/`vet` time — no new analysis pass, no runtime cost.
+- Complements D13: D13 = "how do I repair a broken build," D26 = "what is here to build with." Together they close the agent's read/write loop over the component graph.
+
+**Scope & non-goals.** v0.1 manifest describes the *static* compiled graph only — not live session state, not runtime instances (D2). A stable `code`/version field on the envelope so agents can match against schema changes; no backward-compat promise while `v0.x` (D24). Not a plugin/extension registry (attribute-directive registry stays deferred per D4).
+
+**Rationale.** This is the sharpest expression of the agent-first thesis in CLAUDE.md: the compiler already knows the whole component graph, so handing it to a non-human author as data (not source to re-parse) is nearly free and is something none of the human-authored-first frameworks (LiveView/Hotwire/Livewire/templ) were built to provide.
+
+### D27. Render snapshot assertions in `liquidtest` (D23)
+
+**Problem.** D23's harness can render a component, fire an allowlisted action, and assert on the resulting patch/envelope — but assertions are hand-written. A non-human author cannot eyeball a rendered `[hydroId]` subtree for visual regressions, which is exactly the failure mode for dashboards (D17) and derived-state tiles (D25). Server-driven UI regressions are overwhelmingly "the rendered HTML changed," and that class is mechanically checkable.
+
+**Decision.** Extend `liquidtest` (D23) with golden-snapshot assertions: render a component (or fire an action and capture the patch), compare against a committed snapshot file, fail on diff, and regenerate under an explicit `-update` flag. Snapshots key on the `[hydroId]` subtree boundary (D14) so a patch and a full render assert through the same path.
+
+- Reuses D23's existing render/query/fire internals — additive, not a new harness.
+- The failure diff is emitted in the D13 structured shape where practical, so an agent consumes a snapshot mismatch the same way it consumes a build diagnostic and can self-verify → self-repair.
+- Depends on deterministic rendering (D28) to avoid false diffs from timestamps/ordering/random IDs.
+
+**Scope & non-goals.** Text/HTML-subtree snapshots only — **not** screenshot/pixel diffing (no browser dependency in v0.1, consistent with D3's stdlib-only stance). No implicit auto-update in CI; regeneration is always an explicit local flag so a drifting snapshot is never silently blessed.
+
+**Rationale.** Turns "it compiles" (`vet`) → "it renders the same as before" into a check an agent runs autonomously, which is the verification step D23 already frames as the harness's second purpose. Directly serves D25: derived tiles are precisely what you snapshot.
+
+### D28. Deterministic render mode for reproducible output
+
+**Problem.** Snapshot assertions (D27), agent self-verification (D23), and diffable generated output all break when a render embeds non-deterministic values — wall-clock timestamps, map-iteration ordering, and the cryptographically random `[hydroId]`/CSRF tokens (D15). Those tokens are *correctly* random in production (a framework invariant — never derived, never a memory address), so determinism must be an opt-in test/CI concern, never the production path.
+
+**Decision.** A test/CI-only deterministic mode (build tag or `liquid.Ctx` flag, resolved alongside the `liquiddev` surface) that: seeds a fixed token source for `[hydroId]`/CSRF generation, pins any framework-surfaced clock to an injectable value, and enforces stable ordering for framework-controlled iteration. Off by default; production always uses the CSPRNG path (D15) and real clock.
+
+- The token source and clock become injectable seams (fits D8 DI: swap the provider in tests), not global mutable state.
+- Application-level non-determinism (a component reading `time.Now()` itself) is the author's responsibility; the framework guarantees only that *its own* emitted values are pinnable.
+
+**Scope & non-goals.** Does **not** weaken production security — the invariant that hydro/CSRF tokens are opaque CSPRNG output (D15, CLAUDE.md) is unchanged; deterministic mode is unreachable in a normal build. Not a general "record/replay" facility.
+
+**Rationale.** Small and load-bearing: it is the precondition that makes D27 and reliable agent verification possible at all. Without it, snapshot diffs are noise.
+
+### D29. `vet`-level reactivity leak check (depends on D25)
+
+**Problem.** The bounded-registry / no-leaked-subscription invariant (CLAUDE.md; architecture.md §90) is today only a runtime hazard — a subscription without a session-bound unsubscribe leaks silently and fails under load, invisible to tests. This is exactly the class of bug a non-human author is prone to introduce, and it surfaces at the worst possible time.
+
+**Decision.** Extend the `vet` pass (D1) to statically flag a `Subscribe`/combinator subscription (D25) that is not tied to a session lifecycle hook, emitting it through the D13 diagnostic contract (`{file, line, col, severity, code, message, suggestion}`) with a stable `code`. A subscription created outside an interactive session's managed scope, or without registering an unsubscribe, is a build **warning** (escalating to error where the compiler can prove the leak).
+
+- Piggybacks on `go/types` analysis `vet` already runs (D1) — no new toolchain.
+- Turns a runtime invariant into a build-time signal an agent is *told about* and can self-repair (D13), rather than one it discovers via a production incident.
+- Naturally scoped by D25: once derived subscriptions go through framework combinators, "is this subscription lifecycle-managed?" becomes a decidable static question.
+
+**Scope & non-goals.** Depends on D25 landing first (nothing to check until combinators exist). Best-effort static analysis — it flags the detectable patterns (bare `Subscribe` without a managed owner), not a soundness proof; false negatives are acceptable, false positives should be rare and suppressible. Does not replace the runtime bounded-registry caps (D20) — defense in depth, not a substitute.
+
+**Rationale.** "The framework catches the class of bug the agent is prone to" is the agent-first moat: human-authored-first frameworks never built this because a careful human is assumed. Converting the D25 leak hazard into a D13-delivered diagnostic is the guardrail that makes derived reactive state safe to generate.
+
+---
+
+**Settled decisions D1–D24 are binding. D25–D29 are proposed and await owner sign-off. See [HANDOFF.md](HANDOFF.md) for current state and build order.**
