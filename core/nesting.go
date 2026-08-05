@@ -113,7 +113,7 @@ func (sc *renderScope) child(selector string, args ...any) (template.HTML, error
 	}
 	if reg.hydroField >= 0 {
 		var err error
-		if hydroID, err = randomToken(); err != nil {
+		if hydroID, err = sc.a.newToken(); err != nil {
 			return "", fmt.Errorf("rendering %s: %w", selector, err)
 		}
 		inst.Elem().Field(reg.hydroField).SetString(hydroID)
