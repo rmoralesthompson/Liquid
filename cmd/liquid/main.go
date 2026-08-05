@@ -15,7 +15,7 @@ import (
 	"github.com/rmoralesthompson/liquid/cmd/liquid/internal/compiler"
 )
 
-const usage = "usage: liquid <build|vet|generate|dev|lsp> [args]"
+const usage = "usage: liquid <build|vet|manifest|generate|dev|lsp> [args]"
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout); err != nil {
@@ -42,6 +42,9 @@ func run(args []string, stdout io.Writer) error {
 	}
 	if verb == "lsp" {
 		return runLSP(args[1:], os.Stdin, stdout)
+	}
+	if verb == "manifest" {
+		return runManifest(args[1:], stdout)
 	}
 
 	dir, jsonOut, err := parseArgs(args[1:])
