@@ -25,9 +25,10 @@ func main() {
 }
 
 // run executes one CLI invocation, writing diagnostics to stdout — as the
-// D13 JSON array with --json, one human-readable line each otherwise. Any
-// diagnostics make the invocation fail so build pipelines and agents get a
-// non-zero exit.
+// D13 JSON array with --json, one human-readable line each otherwise. An
+// error-severity diagnostic makes the invocation fail so build pipelines and
+// agents get a non-zero exit; warnings are reported but do not fail the build
+// (D29's captured-subscription case is advisory, not a hard leak).
 func run(args []string, stdout io.Writer) error {
 	if len(args) == 0 {
 		return errors.New(usage)
@@ -64,10 +65,22 @@ func run(args []string, stdout io.Writer) error {
 	if err := printDiagnostics(stdout, diags, jsonOut); err != nil {
 		return err
 	}
-	if len(diags) == 0 {
-		return nil
+	if errs := errorCount(diags); errs > 0 {
+		return fmt.Errorf("%s: %d problem(s) found", verb, errs)
 	}
-	return fmt.Errorf("%s: %d problem(s) found", verb, len(diags))
+	return nil
+}
+
+// errorCount reports how many diagnostics are error-severity — the ones that
+// fail the invocation. Warnings are reported but do not.
+func errorCount(diags []compiler.Diagnostic) int {
+	n := 0
+	for _, d := range diags {
+		if d.Severity == compiler.SeverityError {
+			n++
+		}
+	}
+	return n
 }
 
 // parseArgs splits the arguments after the verb into the target directory

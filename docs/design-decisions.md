@@ -222,6 +222,14 @@ smoothed := liquid.Throttle(metrics, 250*time.Millisecond)   // backpressure for
 
 **Rationale.** "The framework catches the class of bug the agent is prone to" is the agent-first moat: human-authored-first frameworks never built this because a careful human is assumed. Converting the D25 leak hazard into a D13-delivered diagnostic is the guardrail that makes derived reactive state safe to generate.
 
+**Implementation note (#61).** Points settled while building the check:
+
+- **New code `LSX017`.** Emitted through the existing D13 contract (`cmd/liquid/internal/compiler/vet_leak.go`), positioned at the `Subscribe` selector in the paired Go source. `liquid build` and `liquid vet` run it once per component package; `liquid lsp` surfaces it at the template top like any cross-file finding (no second code path — the detector is a `Facts` method on the shared analysis surface).
+- **Detected pattern.** A call to the `Subscribe` method declared on a Liquid core observable (`BehaviorSubject`, `Derived`, or the `Observable` interface, resolved by `go/types` so an unrelated same-named method is not flagged) in the package's own source. The framework-owned `liquid.Observe` path is never a `Subscribe` call, so it is never flagged. Core's own internal `Subscribe` calls are invisible — `vet` only scans application packages, never `core`.
+- **Warning vs. error.** A captured cancel is a **warning** (it may be released somewhere the static check can't follow); a discarded cancel — a bare statement, a `go`/`defer` call, or an assignment entirely to blanks — is an **error** (the cancel is unreachable, so the leak is provable). Exit contract: `liquid build`/`vet` fail on an **error**, but a **warning** is reported (text, `--json`, LSP) without failing the invocation — LSX017 is the first diagnostic to exercise the D13 warning severity, so the CLI now keys its exit code on error-severity findings rather than any finding.
+- **Suppression.** A `//liquid:allow-subscribe` comment on the call's line or the line above silences it, for the rare deliberate hand-managed subscription.
+- **Best-effort.** A directory that will not load (a bare template with no module) is skipped rather than erroring — false negatives are acceptable (D29 scope), and the template gating already reports the real problem.
+
 ---
 
 **Settled decisions D1–D29 are binding. See [HANDOFF.md](HANDOFF.md) for current state and build order.**

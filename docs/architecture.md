@@ -98,6 +98,8 @@ v0.1 transport is stdlib-only (fetch + SSE). WebSocket is a v0.2 upgrade via a m
 
 - App-lifetime subjects live in **services** registered with the injector.
 - Request-scoped reads use `.Value()`; only interactive sessions hold subscriptions, with mandatory unsubscribe hooks.
+- **Derived state** composes over the same subject through framework-owned combinators — `Map`, `CombineLatest`, `Interval`, `Throttle` (D25). A component follows any observable, plain or derived, by declaring `liquid.Observe(src, apply)` from its `Subscriptions()` method; the framework activates the subscription after render and cancels it on session GC, so generated tiles never manage subscription lifecycle themselves.
+- **Leak check (`vet`, D29).** A direct `Subscribe` call on an observable in component code sidesteps that managed lifecycle, so `liquid vet` (D1) statically flags it as **`LSX017`** through the D13 diagnostic contract — a **warning** when the cancel is captured (can't be proven to leak, reported but non-fatal) and an **error** when it is discarded outright (a provable leak that fails the build). The managed `Observe`-within-`Subscriptions()` path is never flagged. Best-effort by design (it detects the call pattern, not every possible leak); a deliberate direct subscription is suppressed with a `//liquid:allow-subscribe` comment on the call's line or the line above. Because the check lives in the shared analysis surface, `liquid lsp` (#41) surfaces it live in-editor. Defense in depth with the runtime bounded-registry caps (D20), not a replacement for them.
 
 ### Dependency injection
 
