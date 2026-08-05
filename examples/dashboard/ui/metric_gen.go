@@ -4,5 +4,5 @@ package ui
 
 // Template returns the compiled .lsx markup for Metric.
 func (c *Metric) Template() string {
-	return "<section data-hydro-id=\"{{ .HydroID }}\" id=\"metric\" class=\"card\" aria-live=\"polite\">\n  <h2>Requests per second</h2>\n  <p><span id=\"reading\">{{ .Reading }}</span> req/s</p>\n</section>"
+	return "<section data-hydro-id=\"{{ .HydroID }}\" id=\"metric\" class=\"card glass\" aria-live=\"polite\">\n  <div class=\"card__head\">\n    <span class=\"card__icon card__icon--metric\">\n      <svg viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M13 2 4.5 13.5H11l-1 8.5 8.5-11.5H12z\"></path></svg>\n    </span>\n    <h2 class=\"card__title\">Requests per second</h2>\n    <span class=\"live-dot\" aria-hidden=\"true\"></span>\n  </div>\n  <p class=\"metric-value\"><span id=\"reading\">{{ .Reading }}</span> <span class=\"metric-unit\">req/s</span></p>\n  <p class=\"card__hint\">Pushed live from the server over SSE.</p>\n</section>"
 }

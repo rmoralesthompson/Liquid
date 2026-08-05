@@ -1,0 +1,16 @@
+<section [hydroId] id="ticker" class="card glass card--wide">
+  <div class="card__head">
+    <span class="card__icon card__icon--ticker">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3.5 18.5 9 13l4 4 6.5-7.5 1.5 1.4L13 20l-4-4-4 4z"/></svg>
+    </span>
+    <h2 class="card__title">Markets</h2>
+    <span class="live-dot" aria-hidden="true"></span>
+  </div>
+  <div class="ticker" role="list" aria-label="Live market quotes">
+    <div class="ticker__item" role="listitem" *goFor="let q of Quotes">
+      <span class="ticker__sym">{{ $q.Symbol }}</span>
+      <span class="ticker__px">{{ $q.Price }}</span>
+      <span class="ticker__chg ticker__chg--{{ $q.Dir }}">{{ $q.Change }}</span>
+    </div>
+  </div>
+</section>

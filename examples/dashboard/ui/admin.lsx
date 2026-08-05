@@ -1,5 +1,82 @@
-<main class="admin">
-  <h1>Admin area</h1>
-  <p>You presented the right key, so the guard let you through.</p>
-  <p><a href="/">Back to the dashboard</a></p>
+<main class="app app--admin">
+  <style>
+    :root {
+      --radius: 26px;
+      --glass-bg: rgba(255,255,255,.13);
+      --glass-bg-strong: rgba(255,255,255,.20);
+      --glass-border: rgba(255,255,255,.35);
+      --glass-shadow: 0 8px 32px rgba(31,38,135,.22), inset 0 1px 0 rgba(255,255,255,.45);
+      --fg: #ffffff; --fg-muted: rgba(255,255,255,.74); --ink: #1a1a2e;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh;
+      font-family: "Google Sans", "Roboto", "Segoe UI", system-ui, sans-serif;
+      color: var(--fg); line-height: 1.5; -webkit-font-smoothing: antialiased;
+      background:
+        radial-gradient(46% 42% at 80% 10%, rgba(255,225,215,.85), rgba(255,225,215,0) 70%),
+        linear-gradient(158deg, #ff4d67 0%, #e5568f 24%, #9b63cf 50%, #5a5fe0 72%, #2338d8 100%);
+      background-attachment: fixed;
+    }
+    .app { max-width: 40rem; margin: 0 auto; padding: 1.75rem 1.25rem 4rem; }
+    .glass {
+      background: var(--glass-bg);
+      -webkit-backdrop-filter: blur(22px) saturate(150%);
+      backdrop-filter: blur(22px) saturate(150%);
+      border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow);
+    }
+    .appbar {
+      display: flex; align-items: center; gap: .9rem; padding: 1rem 1.35rem;
+      margin-bottom: 1.75rem; border-radius: var(--radius);
+    }
+    .appbar__logo {
+      display: grid; place-items: center; width: 46px; height: 46px; border-radius: 50%;
+      background: var(--glass-bg-strong); border: 1px solid var(--glass-border);
+    }
+    .appbar__logo svg { width: 26px; height: 26px; }
+    .appbar__title { margin: 0; font-size: 1.4rem; font-weight: 600; }
+    .appbar__subtitle { margin: .12rem 0 0; font-size: .82rem; font-weight: 400; color: var(--fg-muted); }
+    .card { border-radius: var(--radius); padding: 1.6rem 1.7rem; }
+    .card__head { display: flex; align-items: center; gap: .75rem; margin-bottom: 1rem; }
+    .card__icon {
+      display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%;
+      background: rgba(255,255,255,.9); color: #0e9f6e; box-shadow: 0 2px 8px rgba(0,0,0,.12);
+    }
+    .card__icon svg { width: 24px; height: 24px; }
+    .card__title { margin: 0; font-size: 1.05rem; font-weight: 600; }
+    .card p { margin: 0 0 1.35rem; color: var(--fg-muted); }
+    .btn {
+      display: inline-flex; align-items: center; gap: .45rem; font: inherit; font-size: .85rem;
+      font-weight: 700; letter-spacing: .3px; padding: .7rem 1.25rem; border-radius: 999px;
+      border: none; background: #fff; color: var(--ink); cursor: pointer; text-decoration: none;
+      box-shadow: 0 4px 18px rgba(0,0,0,.16); transition: filter .2s, box-shadow .2s;
+    }
+    .btn svg { width: 18px; height: 18px; }
+    .btn:hover { filter: brightness(1.04); box-shadow: 0 8px 26px rgba(0,0,0,.24); }
+    @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+  </style>
+
+  <header class="appbar glass">
+    <span class="appbar__logo">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 1 3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/></svg>
+    </span>
+    <div>
+      <h1 class="appbar__title">Admin area</h1>
+      <p class="appbar__subtitle">Guarded route · access granted</p>
+    </div>
+  </header>
+
+  <section class="card glass">
+    <div class="card__head">
+      <span class="card__icon">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+      </span>
+      <h2 class="card__title">You're in</h2>
+    </div>
+    <p>You presented the right key, so the guard let you through before the component was ever instantiated.</p>
+    <a class="btn" href="/">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20z"/></svg>
+      Back to the dashboard
+    </a>
+  </section>
 </main>

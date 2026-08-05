@@ -1,5 +1,15 @@
-<section [hydroId] id="counter" class="card">
-  <h2>Counter</h2>
-  <p><span id="count">{{ Count }}</span> clicks</p>
-  <button id="increment" (click)="Increment">+1</button>
+<section [hydroId] id="counter" class="card glass">
+  <div class="card__head">
+    <span class="card__icon card__icon--counter">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg>
+    </span>
+    <h2 class="card__title">Counter</h2>
+  </div>
+  <p class="metric-value"><span id="count">{{ Count }}</span> <span class="metric-unit">clicks</span></p>
+  <div class="card__actions">
+    <button id="increment" class="btn" (click)="Increment">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg>
+      Increment
+    </button>
+  </div>
 </section>
