@@ -29,6 +29,16 @@ const (
 	kindInput    = "[input]"
 )
 
+// Canonical spellings of the kinds-table directives referenced by name
+// outside their rewrite (here, in vet's tag-contextual checks and in the
+// manifest projection). Single source of truth so a spelling can never drift
+// between the table and its readers.
+const (
+	kindHydroID = "[hydroId]"
+	kindClick   = "(click)"
+	kindSubmit  = "(submit)"
+)
+
 // cursor walks a byte slice tracking the 1-based line and byte column of the
 // current position, so scans over raw source can report positions matching
 // what the author typed.
@@ -289,7 +299,7 @@ func checkDirectives(file string, dirs []directive) []Diagnostic {
 		if k == nil {
 			continue
 		}
-		if sel, onChild := childTags[d.tag]; onChild && (k.action || d.name == "[hydroId]") {
+		if sel, onChild := childTags[d.tag]; onChild && (k.action || d.name == kindHydroID) {
 			diags = append(diags, childBindingDiag(file, d, sel))
 			continue
 		}
@@ -388,7 +398,7 @@ func checkInputExpr(file string, d directive) *Diagnostic {
 func checkHydroRoot(file string, dirs []directive) *Diagnostic {
 	var firstBinding *directive
 	for i, d := range dirs {
-		if d.name == "[hydroId]" {
+		if d.name == kindHydroID {
 			return nil
 		}
 		if k := kindByCanonical(d.name); k != nil && k.action && firstBinding == nil {

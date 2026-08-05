@@ -124,6 +124,40 @@ agent writes/edits component .lsx + struct
   → binary/route table updated (dev-mode hot reload)
 ```
 
+Where `liquid build`/`vet` (D13) tell an agent *how to repair what it broke*, **`liquid manifest`** (D26) tells it *what already exists to compose*. It emits a stable graph of the compiled app — the same facts the compiler holds at `build`/`vet` time (D1 `go/types` fields, D4 `[input]` bindings, the D10 action allowlist), handed over as data instead of source to re-parse. Text is the default; `--json` is the agent contract. Together D13 and D26 close the agent's read/write loop over the component graph.
+
+```
+liquid manifest [dir] [--json]
+```
+
+A package that does not compile emits no manifest — the D13 diagnostics are returned and the invocation exits non-zero, exactly as `vet`. On a clean package the `--json` envelope is:
+
+```jsonc
+{
+  "version": "v0",                     // schema code; no backward-compat promise while v0.x (D24)
+  "components": [                       // [] when the dir declares none; sorted by selector
+    {
+      "selector": "app-counter",       // custom-element tag
+      "struct": "Counter",             // paired Go struct
+      "file": "ui/counter.lsx",        // template path
+      "interactive": true,             // declares a [hydroId] root (mints a hydro session)
+      "head": false,                   // provides a Head() document head (D6)
+      "fields": [                       // exported struct fields, in declaration order
+        {"name": "HydroID", "type": "string", "input": false},
+        {"name": "Count", "type": "int", "input": false}
+        // "input": some template binds this field via [input] (D4) — a composition input
+      ],
+      "actions": [                      // allowlisted event handlers (D10), sorted by name
+        {"name": "Increment", "signature": "func()", "takesEvent": false, "events": ["click"]}
+        // signature/takesEvent: the D11 shape (func() vs func(e liquid.Event))
+      ]
+    }
+  ]
+}
+```
+
+**The field names are the API** (the D13 stance): agents match against the shape, so a rename is a schema change flagged by `version`. The graph is the *static* compiled graph only — not live session state or runtime instances (D2). Route associations live in app wiring outside the component package, so they are not part of the graph; `Head()` presence is reported because it lives on the struct.
+
 Supporting pieces: the **Blueprint Catalog** (`BlueprintCatalog`) of parameterized, pre-vetted templates keyed by intent, style guides applied at hydration, and required-field validation so agents get deterministic errors instead of silent misrenders.
 
 ## Subsystem inventory & v0.1 scope
