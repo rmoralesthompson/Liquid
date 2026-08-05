@@ -1,0 +1,27 @@
+<section [hydroId] id="chart" class="card glass card--wide">
+  <div class="card__head">
+    <span class="card__icon card__icon--chart">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 3h2v16h16v2H3zm4 10 4-4 3 3 5-6 1.4 1.3-6.4 7.4-3-3-2.6 2.6z"/></svg>
+    </span>
+    <h2 class="card__title">Portfolio value</h2>
+    <span class="live-dot" aria-hidden="true"></span>
+  </div>
+  <p class="metric-value">
+    <span id="chart-last">{{ Last }}</span>
+    <span class="chip chip--delta chip--{{ Dir }}">{{ Delta }}</span>
+  </p>
+  <div class="spark-wrap">
+    <svg class="spark" viewBox="0 0 640 150" role="img" aria-label="Portfolio value trend">
+      <defs>
+        <linearGradient id="sparkFill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="rgba(255,255,255,.45)"></stop>
+          <stop offset="100%" stop-color="rgba(255,255,255,0)"></stop>
+        </linearGradient>
+      </defs>
+      <path class="spark__area" d="{{ Area }}" fill="url(#sparkFill)"></path>
+      <polyline class="spark__line" points="{{ Line }}" fill="none"></polyline>
+      <circle class="spark__dot" cx="{{ DotX }}" cy="{{ DotY }}" r="4"></circle>
+    </svg>
+  </div>
+  <p class="card__hint">Server-rendered SVG · redrawn live over SSE.</p>
+</section>

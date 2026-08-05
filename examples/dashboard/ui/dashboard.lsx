@@ -1,13 +1,221 @@
-<main class="dashboard">
+<main class="app">
   <style>
-    body { font-family: system-ui, sans-serif; margin: 2rem auto; max-width: 40rem; }
-    .card { border: 1px solid #ccc; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
-    .card h2 { margin-top: 0; font-size: 1rem; }
+    /* ---- Liquid glass theme ---- */
+    :root {
+      --radius: 26px;
+      --glass-bg: rgba(255,255,255,.13);
+      --glass-bg-strong: rgba(255,255,255,.20);
+      --glass-border: rgba(255,255,255,.35);
+      --glass-shadow: 0 8px 32px rgba(31,38,135,.22), inset 0 1px 0 rgba(255,255,255,.45);
+      --glass-shadow-lg: 0 16px 44px rgba(31,38,135,.32), inset 0 1px 0 rgba(255,255,255,.55);
+      --fg: #ffffff;
+      --fg-muted: rgba(255,255,255,.74);
+      --ink: #1a1a2e;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh;
+      font-family: "Google Sans", "Roboto", "Segoe UI", system-ui, -apple-system, sans-serif;
+      color: var(--fg); line-height: 1.5; -webkit-font-smoothing: antialiased;
+      background:
+        radial-gradient(46% 42% at 80% 10%, rgba(255,225,215,.85), rgba(255,225,215,0) 70%),
+        linear-gradient(158deg, #ff4d67 0%, #e5568f 24%, #9b63cf 50%, #5a5fe0 72%, #2338d8 100%);
+      background-attachment: fixed;
+    }
+    .app { max-width: 72rem; margin: 0 auto; padding: 1.75rem 1.25rem 4rem; }
+
+    /* Frosted-glass surface, shared by the app bar and cards. */
+    .glass {
+      background: var(--glass-bg);
+      -webkit-backdrop-filter: blur(22px) saturate(150%);
+      backdrop-filter: blur(22px) saturate(150%);
+      border: 1px solid var(--glass-border);
+      box-shadow: var(--glass-shadow);
+    }
+
+    /* ---- App bar ---- */
+    .appbar {
+      display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+      padding: 1rem 1.35rem; margin-bottom: 1.75rem; border-radius: var(--radius);
+    }
+    .appbar__brand { display: flex; align-items: center; gap: .9rem; }
+    .appbar__logo {
+      display: grid; place-items: center; width: 46px; height: 46px; border-radius: 50%;
+      background: var(--glass-bg-strong); border: 1px solid var(--glass-border); color: #fff;
+    }
+    .appbar__logo svg { width: 26px; height: 26px; }
+    .appbar__title { margin: 0; font-size: 1.4rem; font-weight: 600; letter-spacing: .2px; }
+    .appbar__subtitle { margin: .12rem 0 0; font-size: .82rem; font-weight: 400; color: var(--fg-muted); }
+
+    /* ---- Card grid ---- */
+    .grid { display: grid; gap: 1.35rem; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); }
+    .grid--single { grid-template-columns: minmax(0, 32rem); justify-content: center; }
+
+    /* ---- Card ---- */
+    .card {
+      position: relative; border-radius: var(--radius); padding: 1.4rem 1.5rem 1.5rem;
+      transition: box-shadow .25s ease, transform .25s ease;
+    }
+    .card:hover { box-shadow: var(--glass-shadow-lg); transform: translateY(-3px); }
+    .card__head { display: flex; align-items: center; gap: .75rem; margin-bottom: 1rem; }
+    .card__icon {
+      display: grid; place-items: center; width: 42px; height: 42px; flex: 0 0 auto;
+      border-radius: 50%; background: rgba(255,255,255,.9); color: #5b4bd6;
+      box-shadow: 0 2px 8px rgba(0,0,0,.12);
+    }
+    .card__icon svg { width: 22px; height: 22px; }
+    .card__icon--counter { color: #4338ca; }
+    .card__icon--metric  { color: #0e9f6e; }
+    .card__icon--stat    { color: #d97706; }
+    .card__icon--renamer { color: #c026d3; }
+    .card__icon--ticker  { color: #0e9f6e; }
+    .card__icon--chart   { color: #2563eb; }
+    /* Wide cards (ticker, chart) span the whole grid row. */
+    .card--wide { grid-column: 1 / -1; }
+    .card__title { margin: 0; font-size: .95rem; font-weight: 600; color: var(--fg-muted); letter-spacing: .2px; }
+
+    .live-dot {
+      margin-left: auto; width: 10px; height: 10px; border-radius: 50%;
+      background: #34d399; animation: pulse 1.6s infinite;
+    }
+    @keyframes pulse {
+      0%   { box-shadow: 0 0 0 0 rgba(52,211,153,.55); }
+      70%  { box-shadow: 0 0 0 11px rgba(52,211,153,0); }
+      100% { box-shadow: 0 0 0 0 rgba(52,211,153,0); }
+    }
+
+    .metric-value {
+      display: flex; align-items: baseline; flex-wrap: wrap; gap: .5rem;
+      margin: .1rem 0 0; font-size: 2.7rem; font-weight: 700;
+      letter-spacing: -1.5px; line-height: 1.05; color: #fff;
+    }
+    .metric-value--text { font-size: 1.7rem; letter-spacing: -.3px; }
+    .metric-unit { font-size: 1rem; font-weight: 500; letter-spacing: 0; color: var(--fg-muted); }
+    .card__hint { margin: .6rem 0 0; font-size: .8rem; color: var(--fg-muted); }
+    .card__actions { margin-top: 1.25rem; display: flex; gap: .6rem; }
+
+    /* ---- Buttons ---- */
+    .btn {
+      display: inline-flex; align-items: center; gap: .45rem; font: inherit;
+      font-size: .85rem; font-weight: 700; letter-spacing: .3px;
+      padding: .7rem 1.25rem; border: none; border-radius: 999px;
+      background: #fff; color: var(--ink); cursor: pointer;
+      box-shadow: 0 4px 18px rgba(0,0,0,.16);
+      transition: filter .2s, box-shadow .2s, transform .1s, background .2s;
+    }
+    .btn svg { width: 18px; height: 18px; }
+    .btn:hover { filter: brightness(1.04); box-shadow: 0 8px 26px rgba(0,0,0,.24); }
+    .btn:active { transform: translateY(1px); }
+    .btn:focus-visible { outline: 3px solid rgba(255,255,255,.9); outline-offset: 2px; }
+    /* Tonal = translucent glass button (white text). */
+    .btn--tonal {
+      background: var(--glass-bg-strong); color: #fff;
+      border: 1px solid var(--glass-border); box-shadow: none;
+      -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+    }
+    .btn--tonal:hover { background: rgba(255,255,255,.3); box-shadow: none; }
+    /* Text button, used on the app bar. */
+    .btn--text {
+      background: rgba(255,255,255,.14); color: #fff; box-shadow: none;
+      border: 1px solid var(--glass-border); padding: .55rem 1rem; font-weight: 600;
+    }
+    .btn--text:hover { background: rgba(255,255,255,.26); filter: none; }
+
+    /* ---- Text field ---- */
+    .field-row { display: flex; align-items: flex-end; gap: .7rem; margin-top: 1.15rem; }
+    .field { flex: 1; }
+    .field__label { display: block; margin-bottom: .45rem; font-size: .78rem; font-weight: 600; color: var(--fg-muted); }
+    .field__input {
+      width: 100%; font: inherit; font-size: .95rem; padding: .8rem .95rem;
+      border: 1px solid var(--glass-border); border-radius: 14px;
+      background: rgba(255,255,255,.12); color: #fff;
+      -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+      transition: border-color .15s, box-shadow .15s, background .15s;
+    }
+    .field__input::placeholder { color: rgba(255,255,255,.55); }
+    .field__input:focus {
+      outline: none; border-color: rgba(255,255,255,.9);
+      background: rgba(255,255,255,.2); box-shadow: 0 0 0 4px rgba(255,255,255,.18);
+    }
+
+    /* ---- Chip (pinned / badge): solid white pill, dark ink ---- */
+    .chip {
+      display: inline-flex; align-items: center; gap: .4rem; margin: 1rem 0 0;
+      padding: .45rem .85rem; border-radius: 999px; font-size: .8rem; font-weight: 700;
+      background: rgba(255,255,255,.95); color: var(--ink);
+    }
+    .chip svg { width: 16px; height: 16px; }
+    .chip--delta { font-size: .85rem; }
+    .chip--up { color: #0a7d3c; }
+    .chip--down { color: #c0264a; }
+
+    /* ---- Market ticker rail ---- */
+    .ticker { display: flex; gap: .55rem; overflow-x: auto; padding-bottom: .3rem; }
+    .ticker::-webkit-scrollbar { height: 6px; }
+    .ticker::-webkit-scrollbar-thumb { background: rgba(255,255,255,.35); border-radius: 999px; }
+    .ticker__item {
+      display: flex; align-items: center; gap: .6rem; flex: 0 0 auto; white-space: nowrap;
+      padding: .6rem .9rem; border-radius: 14px;
+      background: rgba(255,255,255,.1); border: 1px solid var(--glass-border);
+      animation: tick .9s ease;
+    }
+    @keyframes tick { from { background: rgba(255,255,255,.28); } to { background: rgba(255,255,255,.1); } }
+    .ticker__sym { font-weight: 700; letter-spacing: .4px; }
+    .ticker__px { color: #fff; font-variant-numeric: tabular-nums; }
+    .ticker__chg {
+      font-weight: 700; font-size: .8rem; padding: .18rem .55rem; border-radius: 999px;
+      font-variant-numeric: tabular-nums;
+    }
+    .ticker__chg--up { color: #b9f5d8; background: rgba(52,211,153,.22); }
+    .ticker__chg--down { color: #ffc9c9; background: rgba(248,113,113,.22); }
+
+    /* ---- Sparkline chart ---- */
+    .spark-wrap { margin-top: .5rem; }
+    .spark { display: block; width: 100%; height: auto; overflow: visible; }
+    .spark__area { stroke: none; }
+    .spark__line {
+      fill: none; stroke: #ffffff; stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round;
+      filter: drop-shadow(0 2px 6px rgba(0,0,0,.25));
+    }
+    .spark__dot { fill: #fff; stroke: rgba(37,99,235,.45); stroke-width: 2; }
+
+    /* ---- Footer ---- */
+    .footer { margin-top: 2.5rem; text-align: center; font-size: .82rem; color: var(--fg-muted); }
+    .footer a { color: #fff; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { animation: none !important; transition: none !important; }
+      .card:hover { transform: none; }
+    }
   </style>
-  <h1>Liquid example dashboard</h1>
-  <app-counter></app-counter>
-  <app-metric [reading]="CurrentRate"></app-metric>
-  <app-stat-card [label]="StatLabel" [value]="StatValue"></app-stat-card>
-  <app-renamer [name]="BoardName"></app-renamer>
-  <p><a href="/admin?key=letmein">Admin area</a> (guarded — drop the key to get bounced)</p>
+
+  <header class="appbar glass">
+    <div class="appbar__brand">
+      <span class="appbar__logo">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2s6.5 6.9 6.5 11.5a6.5 6.5 0 0 1-13 0C5.5 8.9 12 2 12 2z"/></svg>
+      </span>
+      <div>
+        <h1 class="appbar__title">Liquid</h1>
+        <p class="appbar__subtitle">Server-driven UI · live component demo</p>
+      </div>
+    </div>
+    <a class="btn btn--text" href="/admin?key=letmein">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 1 3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/></svg>
+      Admin
+    </a>
+  </header>
+
+  <section class="grid">
+    <app-ticker></app-ticker>
+    <app-chart></app-chart>
+    <app-counter></app-counter>
+    <app-metric [reading]="CurrentRate"></app-metric>
+    <app-stat-card [label]="StatLabel" [value]="StatValue"></app-stat-card>
+    <app-renamer [name]="BoardName"></app-renamer>
+  </section>
+
+  <footer class="footer">
+    <p><a href="/admin?key=letmein">Admin area</a> — guarded route; drop the key to get bounced.</p>
+  </footer>
 </main>

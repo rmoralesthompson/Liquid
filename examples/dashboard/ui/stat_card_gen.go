@@ -4,7 +4,7 @@ package ui
 
 // Template returns the compiled .lsx markup for StatCard.
 func (c *StatCard) Template() string {
-	return "<section data-hydro-id=\"{{ .HydroID }}\" id=\"stat-card\" class=\"card\">\n  <h2>{{ .Label }}</h2>\n  <p id=\"stat-value\">{{ .Value }}</p>\n  {{if .Pinned}}<p id=\"pin-state\">Pinned to the top of your reports.</p>{{end}}\n  <button id=\"pin\" data-liquid-action=\"TogglePin\">Toggle pin</button>\n</section>"
+	return "<section data-hydro-id=\"{{ .HydroID }}\" id=\"stat-card\" class=\"card glass\">\n  <div class=\"card__head\">\n    <span class=\"card__icon card__icon--stat\">\n      <svg viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M4 20h4V10H4v10zm6 0h4V4h-4v16zm6 0h4v-7h-4v7z\"></path></svg>\n    </span>\n    <h2 class=\"card__title\">{{ .Label }}</h2>\n  </div>\n  <p class=\"metric-value\"><span id=\"stat-value\">{{ .Value }}</span></p>\n  {{if .Pinned}}<p id=\"pin-state\" class=\"chip\">\n    <svg viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M16 9V4h1a1 1 0 0 0 0-2H7a1 1 0 0 0 0 2h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3z\"></path></svg>\n    Pinned to the top of your reports.</p>{{end}}\n  <div class=\"card__actions\">\n    <button id=\"pin\" class=\"btn btn--tonal\" data-liquid-action=\"TogglePin\">Toggle pin</button>\n  </div>\n</section>"
 }
 
 // Actions returns the action allowlist compiled from StatCard's event

@@ -4,7 +4,7 @@ package ui
 
 // Template returns the compiled .lsx markup for Counter.
 func (c *Counter) Template() string {
-	return "<section data-hydro-id=\"{{ .HydroID }}\" id=\"counter\" class=\"card\">\n  <h2>Counter</h2>\n  <p><span id=\"count\">{{ .Count }}</span> clicks</p>\n  <button id=\"increment\" data-liquid-action=\"Increment\">+1</button>\n</section>"
+	return "<section data-hydro-id=\"{{ .HydroID }}\" id=\"counter\" class=\"card glass\">\n  <div class=\"card__head\">\n    <span class=\"card__icon card__icon--counter\">\n      <svg viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z\"></path></svg>\n    </span>\n    <h2 class=\"card__title\">Counter</h2>\n  </div>\n  <p class=\"metric-value\"><span id=\"count\">{{ .Count }}</span> <span class=\"metric-unit\">clicks</span></p>\n  <div class=\"card__actions\">\n    <button id=\"increment\" class=\"btn\" data-liquid-action=\"Increment\">\n      <svg viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z\"></path></svg>\n      Increment\n    </button>\n  </div>\n</section>"
 }
 
 // Actions returns the action allowlist compiled from Counter's event

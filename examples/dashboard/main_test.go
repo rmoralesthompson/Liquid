@@ -16,7 +16,9 @@ import (
 func newHarness(t *testing.T) (*liquidtest.Harness, *liquid.BehaviorSubject[int]) {
 	t.Helper()
 	requests := liquid.NewBehaviorSubject(42)
-	app, err := newApp(requests)
+	market := liquid.NewBehaviorSubject(quotesOf(seedAssets()))
+	series := liquid.NewBehaviorSubject(seedSeries())
+	app, err := newApp(requests, market, series)
 	if err != nil {
 		t.Fatalf("newApp: %v", err)
 	}
@@ -43,6 +45,25 @@ func TestDashboardRendersAllFiveCards(t *testing.T) {
 	}
 	if page.Text("h1") == "" {
 		t.Error("page renders no h1 heading")
+	}
+}
+
+func TestTickerAndChartRenderSeededData(t *testing.T) {
+	h, _ := newHarness(t)
+	page := h.Get("/")
+
+	// The ticker renders its seeded book straight off the injected subject —
+	// no [input] and no OnInit (children skip it).
+	if !strings.Contains(page.Body, "BTC") {
+		t.Errorf("ticker did not render the seeded BTC quote\n--- body ---\n%s", page.Body)
+	}
+	// The chart's last value is a server-formatted USD figure, and its SVG
+	// path is generated on the server.
+	if got := page.Text("#chart-last"); !strings.HasPrefix(got, "$") {
+		t.Errorf(`chart Text("#chart-last") = %q, want a "$"-prefixed value`, got)
+	}
+	if !strings.Contains(page.Body, `class="spark__line"`) {
+		t.Error("chart did not render the server-side SVG sparkline")
 	}
 }
 
@@ -74,11 +95,15 @@ func TestMetricEmissionIsPushedOverSSE(t *testing.T) {
 
 	requests.Next(97)
 
-	// Only the metric card subscribes, so every push re-renders it; scan a
-	// few pushes because the connect-time priming push may arrive first.
+	// Several cards subscribe, so connecting the stream primes a current-state
+	// push for each (metric, ticker, chart) before the requests emission
+	// arrives; skip the frames that are not the metric's and scan a few pushes.
 	var seen []string
-	for range 5 {
+	for range 10 {
 		push := stream.Next()
+		if !strings.Contains(push.Patch, `id="reading"`) {
+			continue // a ticker/chart prime frame, not the metric card
+		}
 		got := push.Text("#reading")
 		if got == "97" {
 			return

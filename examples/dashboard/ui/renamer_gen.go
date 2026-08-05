@@ -4,7 +4,7 @@ package ui
 
 // Template returns the compiled .lsx markup for Renamer.
 func (c *Renamer) Template() string {
-	return "<section data-hydro-id=\"{{ .HydroID }}\" id=\"renamer\" class=\"card\">\n  <h2>Board name</h2>\n  <p id=\"board-name\">{{ .Name }}</p>\n  <form data-liquid-submit=\"Rename\">\n    <label for=\"new-name\">New name</label>\n    <input id=\"new-name\" name=\"name\" autocomplete=\"off\"/>\n    <button id=\"save\">Save</button>\n  <input type=\"hidden\" name=\"csrf_token\" value=\"{{ .CSRFToken }}\"/></form>\n</section>"
+	return "<section data-hydro-id=\"{{ .HydroID }}\" id=\"renamer\" class=\"card glass\">\n  <div class=\"card__head\">\n    <span class=\"card__icon card__icon--renamer\">\n      <svg viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M3 17.25V21h3.75L17.8 9.94l-3.75-3.75L3 17.25zM20.7 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z\"></path></svg>\n    </span>\n    <h2 class=\"card__title\">Board name</h2>\n  </div>\n  <p class=\"metric-value metric-value--text\"><span id=\"board-name\">{{ .Name }}</span></p>\n  <form class=\"field-row\" data-liquid-submit=\"Rename\">\n    <div class=\"field\">\n      <label for=\"new-name\" class=\"field__label\">New name</label>\n      <input id=\"new-name\" name=\"name\" class=\"field__input\" autocomplete=\"off\" placeholder=\"Rename the board…\"/>\n    </div>\n    <button id=\"save\" class=\"btn\">Save</button>\n  <input type=\"hidden\" name=\"csrf_token\" value=\"{{ .CSRFToken }}\"/></form>\n</section>"
 }
 
 // Actions returns the action allowlist compiled from Renamer's event

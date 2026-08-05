@@ -1,4 +1,11 @@
-<section [hydroId] id="metric" class="card" aria-live="polite">
-  <h2>Requests per second</h2>
-  <p><span id="reading">{{ Reading }}</span> req/s</p>
+<section [hydroId] id="metric" class="card glass" aria-live="polite">
+  <div class="card__head">
+    <span class="card__icon card__icon--metric">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M13 2 4.5 13.5H11l-1 8.5 8.5-11.5H12z"/></svg>
+    </span>
+    <h2 class="card__title">Requests per second</h2>
+    <span class="live-dot" aria-hidden="true"></span>
+  </div>
+  <p class="metric-value"><span id="reading">{{ Reading }}</span> <span class="metric-unit">req/s</span></p>
+  <p class="card__hint">Pushed live from the server over SSE.</p>
 </section>
