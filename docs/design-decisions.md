@@ -195,6 +195,14 @@ smoothed := liquid.Throttle(metrics, 250*time.Millisecond)   // backpressure for
 
 **Rationale.** Turns "it compiles" (`vet`) → "it renders the same as before" into a check an agent runs autonomously, which is the verification step D23 already frames as the harness's second purpose. Directly serves D25: derived tiles are precisely what you snapshot.
 
+**Implementation note (#60).** Points settled while building it:
+
+- **`Page.MatchSnapshot(name)` and `Patch.MatchSnapshot(name)`** (`liquidtest/snapshot.go`) — additive methods on the existing D23 `Page`/`Patch`. Both serialize the first `[hydroId]` subtree via `html.Render` (falling back to `<body>` content for a non-interactive page), so a full render and a fired patch of the same component produce identical bytes and can assert against one golden file (D14 symmetry).
+- **Golden files** live at `liquidtest/testdata/snapshots/<name>.snap.html` under the *consuming* package's `testdata/` (never compiled by the go tool). `<name>` must be a simple identifier — a path separator or `..` is refused.
+- **`-update` is a package-level `flag.Bool`** with no implicit path: an ordinary run only ever reads and compares. A missing snapshot **fails** (with an `-update` hint) rather than being silently created, so CI can never bless a first-seen or drifted render. Invoke as `go test -tags liquiddev ./liquidtest -update` (build flags before the package, the test-binary flag after).
+- **Deterministic mode is required and gated.** The end-to-end snapshot tests construct `core.New(core.WithDeterminism())` and therefore run under `//go:build liquiddev` (D28's opt-in exists only there); the pure machinery (diff, path safety, subtree extraction, the create/compare/mismatch file contract) is white-box unit-tested without the tag, so an ordinary `go test ./...` still guards it.
+- **D13-shaped failure.** A mismatch emits a `diagnostic: {…}` JSON line carrying `file`/`line`/`col`/`severity`/`code`/`message`/`suggestion` (code `SNAP001`), positioned at the first differing line/col, followed by a trimmed `-`/`+` diff. The internal `compiler.Diagnostic` is unimportable from this module-level package, so the field vocabulary is reproduced locally rather than shared.
+
 ### D28. Deterministic render mode for reproducible output
 
 **Problem.** Snapshot assertions (D27), agent self-verification (D23), and diffable generated output all break when a render embeds non-deterministic values — wall-clock timestamps, map-iteration ordering, and the cryptographically random `[hydroId]`/CSRF tokens (D15). Those tokens are *correctly* random in production (a framework invariant — never derived, never a memory address), so determinism must be an opt-in test/CI concern, never the production path.
