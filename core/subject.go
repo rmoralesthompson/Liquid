@@ -78,18 +78,30 @@ type Subscription struct {
 	apply func()
 }
 
-// Observe declares that an interactive component follows a subject: every
+// Observe declares that an interactive component follows an observable: every
 // emission runs apply (typically assigning to a field) and pushes the
 // re-rendered component over the session's SSE stream (D3). apply receives
-// the subject's current value at render time, which under rapid emissions
+// the source's current value at render time, which under rapid emissions
 // may skip intermediate values — pushes carry latest state, not history
 // (D20).
-func Observe[T any](s *BehaviorSubject[T], apply func(T)) Subscription {
+//
+// The source is any Observable, so a component observes a plain subject or a
+// derived combinator (Map, CombineLatest, Interval, Throttle) identically. If
+// the source is a derived value, observing it also activates its internal
+// upstream wiring, and the cancel returned to the pump tears that wiring down
+// with the binding — so a derived value's leak-prone subscriptions live and
+// die with the session's registry entry, never in generated code (D25).
+func Observe[T any](src Observable[T], apply func(T)) Subscription {
 	return Subscription{
 		subscribe: func(notify func()) func() {
-			return s.Subscribe(func(T) { notify() })
+			releaseWiring := activateUpstream(src)
+			cancel := src.Subscribe(func(T) { notify() })
+			return func() {
+				cancel()
+				releaseWiring()
+			}
 		},
-		apply: func() { apply(s.Value()) },
+		apply: func() { apply(src.Value()) },
 	}
 }
 
