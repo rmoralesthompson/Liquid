@@ -8,8 +8,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 )
@@ -366,6 +368,7 @@ func (a *App) ensureSession(w http.ResponseWriter, r *http.Request) (string, err
 	if err != nil {
 		return "", fmt.Errorf("minting session ID: %w", err)
 	}
+	a.warnInsecureCookie(r)
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    id,
@@ -375,6 +378,44 @@ func (a *App) ensureSession(w http.ResponseWriter, r *http.Request) (string, err
 		SameSite: http.SameSiteLaxMode,
 	})
 	return id, nil
+}
+
+// warnInsecureCookie logs once when the session cookie is minted for a request
+// a browser will silently reject it on: plain HTTP (no TLS) served on a
+// non-localhost host. The cookie is always Secure (D15) — no posture change —
+// so such a browser drops it and re-mints every request, killing interactivity
+// with no visible cause. Browsers trust http://localhost, so liquid dev's
+// default serving is exempt. The heuristic false-positives behind a
+// TLS-terminating proxy; the message says so, and it fires at most once (#47).
+func (a *App) warnInsecureCookie(r *http.Request) {
+	if r.TLS != nil || isLocalhost(r.Host) {
+		return
+	}
+	a.insecureWarn.Do(func() {
+		a.logger.Warn(
+			"session cookie is Secure but this request is plain HTTP on a non-localhost host: "+
+				"the browser will drop the cookie and every hydro event will look session-less. "+
+				"Serve over TLS (ignore this if TLS terminates upstream of the app).",
+			"host", r.Host,
+		)
+	})
+}
+
+// isLocalhost reports whether host (a request Host header, optionally with a
+// port) names a loopback origin a browser treats as trustworthy for Secure
+// cookies: localhost, 127.0.0.1, or ::1.
+func isLocalhost(host string) bool {
+	h := host
+	if hostname, _, err := net.SplitHostPort(host); err == nil {
+		h = hostname
+	}
+	h = strings.TrimSuffix(strings.TrimPrefix(h, "["), "]")
+	switch h {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	default:
+		return false
+	}
 }
 
 // hydroIDField returns the index of a component type's HydroID string field,

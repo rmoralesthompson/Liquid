@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -30,6 +31,8 @@ type App struct {
 	limits     Limits                   // registry and request bounds, defaults applied (D20)
 	now        func() time.Time         // the App's clock; replaceable in tests for idle-expiry control
 	dev        devState                 // dev-build broadcaster (D16); an empty struct in production builds
+
+	insecureWarn sync.Once // fires the plain-HTTP-non-localhost Secure-cookie warning at most once (#47)
 }
 
 // registration is one component type's render machinery, resolved once when
