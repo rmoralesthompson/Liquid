@@ -11,6 +11,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -26,18 +27,77 @@ import (
 // written for a .lsx with an error diagnostic); the error covers mechanical
 // failures such as unreadable directories.
 func Build(ctx context.Context, dir string) ([]Diagnostic, error) {
-	return eachLSX(dir, func(path string) ([]Diagnostic, error) {
+	diags, err := eachLSX(dir, func(path string) ([]Diagnostic, error) {
 		return compileFile(ctx, path)
 	})
+	if err != nil {
+		return nil, err
+	}
+	leaks, err := vetSubscriptions(ctx, dir)
+	if err != nil {
+		return nil, err
+	}
+	return append(diags, leaks...), nil
 }
 
 // Vet runs the same diagnostic checks as Build on every .lsx file under dir
 // without writing any generated files (D13).
 func Vet(ctx context.Context, dir string) ([]Diagnostic, error) {
-	return eachLSX(dir, func(path string) ([]Diagnostic, error) {
+	diags, err := eachLSX(dir, func(path string) ([]Diagnostic, error) {
 		diags, _, err := analyzeFile(ctx, path)
 		return diags, err
 	})
+	if err != nil {
+		return nil, err
+	}
+	leaks, err := vetSubscriptions(ctx, dir)
+	if err != nil {
+		return nil, err
+	}
+	return append(diags, leaks...), nil
+}
+
+// vetSubscriptions runs the D29 reactivity-leak check (VetSubscriptions) once
+// per package that has a template under dir, so a leaky Subscribe is reported
+// exactly once regardless of how many .lsx files sit beside it.
+func vetSubscriptions(ctx context.Context, dir string) ([]Diagnostic, error) {
+	dirs, err := lsxDirs(dir)
+	if err != nil {
+		return nil, err
+	}
+	var diags []Diagnostic
+	for _, d := range dirs {
+		facts, err := LoadFacts(ctx, d)
+		if err != nil {
+			// Best-effort (D29): a directory that will not even load — a bare
+			// template with no Go module — has no checkable subscriptions, and
+			// its template gating already reports the real problem.
+			continue
+		}
+		diags = append(diags, facts.VetSubscriptions()...)
+	}
+	return diags, nil
+}
+
+// lsxDirs returns the distinct directories under dir that contain at least one
+// .lsx file, sorted for deterministic output — one per component package.
+func lsxDirs(dir string) ([]string, error) {
+	seen := make(map[string]bool)
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() && strings.HasSuffix(path, ".lsx") {
+			seen[filepath.Dir(path)] = true
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("scanning %s for .lsx files: %w", dir, err)
+	}
+	dirs := slices.Collect(maps.Keys(seen))
+	slices.Sort(dirs)
+	return dirs, nil
 }
 
 // eachLSX applies fn to every .lsx file under dir, collecting diagnostics.

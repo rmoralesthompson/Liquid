@@ -237,7 +237,9 @@ func fingerprint(dir string) string {
 }
 
 // diagnostics runs the exact Build/Vet gating for one buffer: pairing
-// (LSX002), then source-level findings, then the vet cross-check.
+// (LSX002), then source-level findings, then the vet cross-check, and finally
+// the package's D29 reactivity-leak findings (LSX017), which live in the
+// paired Go source — surfaced at the template top like any cross-file finding.
 func (d *document) diagnostics() []compiler.Diagnostic {
 	if diag := compiler.PairingDiagnostic(d.path); diag != nil {
 		return []compiler.Diagnostic{*diag}
@@ -245,7 +247,8 @@ func (d *document) diagnostics() []compiler.Diagnostic {
 	if d.facts == nil {
 		return d.sa.Diagnostics
 	}
-	return d.facts.Vet(d.path, d.structName, d.sa)
+	diags := d.facts.Vet(d.path, d.structName, d.sa)
+	return append(diags, d.facts.VetSubscriptions()...)
 }
 
 // publishDiagnostics maps compiler diagnostics onto the buffer and sends

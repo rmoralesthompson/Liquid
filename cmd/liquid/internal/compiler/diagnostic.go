@@ -66,6 +66,14 @@ const (
 	// struct lacks the HydroID string field — without it the completion
 	// patch has no boundary to swap at.
 	CodeMissingDeferHydroField Code = "LSX016"
+	// CodeUnmanagedSubscription reports a direct Subscribe call on a Liquid
+	// observable (BehaviorSubject, Derived, or the Observable interface) in
+	// component code, whose lifecycle is not owned by the framework (D25/D29).
+	// A bare call that discards its cancel is a provable leak (error); a call
+	// whose cancel is captured but not session-bound is a warning. The managed
+	// path is liquid.Observe within Subscriptions(). Suppress a deliberate
+	// direct subscription with a //liquid:allow-subscribe comment.
+	CodeUnmanagedSubscription Code = "LSX017"
 )
 
 // Diagnostic is one structured compiler finding: the literal contract an

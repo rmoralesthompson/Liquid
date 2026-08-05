@@ -239,6 +239,32 @@ func TestPublishesVetDiagnosticsOnOpenAndClearsOnFix(t *testing.T) {
 	}
 }
 
+// TestPublishesReactivityLeakFromPairedGoSource covers D29 surfacing in-editor
+// for free: opening a template whose paired package holds a bare Subscribe
+// publishes the LSX017 leak, positioned in the Go source and surfaced at the
+// template top like any cross-file finding.
+func TestPublishesReactivityLeakFromPairedGoSource(t *testing.T) {
+	c := newClient(t)
+	dir, err := filepath.Abs(filepath.Join("..", "compiler", "testdata", "leaks"))
+	if err != nil {
+		t.Fatalf("resolving leaks fixture: %v", err)
+	}
+	path := filepath.Join(dir, "leaky.lsx")
+	src, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading fixture: %v", err)
+	}
+
+	diags := c.open("file://"+path, string(src))
+
+	if len(diags) != 1 || diags[0].Code != "LSX017" {
+		t.Fatalf("diagnostics = %+v, want exactly one LSX017", diags)
+	}
+	if !strings.Contains(diags[0].Message, "leaky.go:19:11") {
+		t.Errorf("message %q should carry the Go source position of the leak", diags[0].Message)
+	}
+}
+
 func TestHoverOnFieldShowsTypeAndDoc(t *testing.T) {
 	c := newClient(t)
 	_, uri, text := fixture(t)

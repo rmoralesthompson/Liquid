@@ -63,12 +63,12 @@ A server-driven UI framework for Go: **Phoenix LiveView's runtime model + Angula
 - **[#58 — D26 `liquid manifest --json`](https://github.com/rmoralesthompson/Liquid/issues/58)** (machine-readable component/action graph for agents; extends D13, reuses the compiler's existing facts). Independent — **startable now.**
 - **[#59 — D28 deterministic render mode](https://github.com/rmoralesthompson/Liquid/issues/59)** (test/CI-only token/clock/ordering seams; preserves the D15 CSPRNG invariant in prod). Independent — **startable now; precondition for #60.**
 - **[#60 — D27 `liquidtest` render-snapshot assertions](https://github.com/rmoralesthompson/Liquid/issues/60)** (extends #7/#23's harness). **Blocked by #59.**
-- **[#61 — D29 `vet`-level reactivity leak check](https://github.com/rmoralesthompson/Liquid/issues/61)** (turns the no-leak invariant into a D13 diagnostic). **Blocked by #57.**
+- **[#61 — D29 `vet`-level reactivity leak check](https://github.com/rmoralesthompson/Liquid/issues/61)** (turns the no-leak invariant into a D13 diagnostic). **DONE (branch `ticket-61-vet-leak`, PR open):** new code **`LSX017`** (`cmd/liquid/internal/compiler/vet_leak.go`) flags a direct `Subscribe` on a Liquid observable in app code — **warning** when the cancel is captured, **error** when discarded (provable leak); the managed `Observe`-in-`Subscriptions()` path is never flagged, `//liquid:allow-subscribe` suppresses. Runs once per component package in `build`/`vet` and surfaces live via `liquid lsp` (a `Facts` method on the shared analysis surface — no second code path). Best-effort (D29): unloadable dirs are skipped. Its prerequisite **#57 (D25) is merged** (`c504293`).
 
   The charts/visualization non-goal noted in D25 stands: a userland/component-library concern, not framework scope.
 - **Still unbuilt, for whoever needs it:** D24's App shutdown lifecycle (the #9 idle-GC sweep deferral rides with it; `liquid dev` kills its child by signal today and did not need it). D6's `ProvideAs` interface-keyed registration (deferred on #6). Cross-package child selectors (v0.1 is same-package only, #11).
 
-**Net:** the prior frontier (#26, #45–#47) and the decision backlog (#27) are cleared and merged. The next implementation work is **D25–D29, now tickets #57–#61**: **#57 / #58 / #59 startable immediately**, **#60 after #59**, **#61 after #57**. Human-gated: merging whatever PRs these produce.
+**Net:** the prior frontier (#26, #45–#47) and the decision backlog (#27) are cleared and merged. Of the D25–D29 batch, **#57 (D25) is merged** and **#61 (D29) is done (PR open)**. Remaining: **#58 / #59 startable immediately**, **#60 after #59**. Human-gated: merging whatever PRs these produce.
 
 ## 5. Reading order for a fresh context
 
