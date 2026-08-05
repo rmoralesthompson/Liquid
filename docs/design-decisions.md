@@ -1,8 +1,8 @@
 # Liquid — Design Decisions
 
-Decision log for the framework. Decisions D1–D24 are settled and binding unless explicitly revisited; proposed drafts (D25+) live under **Proposed** at the bottom and are not binding until accepted.
+Decision log for the framework. Decisions D1–D29 are settled and binding unless explicitly revisited.
 
-**D1–D9 accepted 2026-08-02; D10–D17 accepted 2026-08-02; D18–D24 accepted 2026-08-02** (owner: Richard).
+**D1–D9 accepted 2026-08-02; D10–D17 accepted 2026-08-02; D18–D24 accepted 2026-08-02; D25–D29 accepted 2026-08-05** (owner: Richard).
 
 ## Settled
 
@@ -139,13 +139,10 @@ Minimal harness — render a component to HTML, query it, fire an allowlisted ac
 - **Versioning:** semver; `v0.x` = no compatibility promises, stated in README when it's rewritten.
 - **License:** **Apache-2.0** (chosen 2026-08-02; patent grant preferred over MIT for a framework meant for ecosystem adoption). `LICENSE` file at repo root, copyright Richard Morales Thompson.
 
----
-
-## Proposed (not yet accepted)
-
-Entries below are drafts awaiting owner sign-off. They are **not binding** and may be revised or rejected. Do not build against them until moved to **Settled** with an acceptance date.
-
 ### D25. Derived reactive state: stream combinators over `BehaviorSubject[T]`
+
+*Accepted 2026-08-05, with D26–D29, as the agent-first / reactive-views batch. Each extends the framework for agent-generated dashboards while staying inside v0.1's settled architecture — no wire-format or transport change. All are accepted but unbuilt; see [HANDOFF.md](HANDOFF.md) §4 for build order.*
+
 
 **Problem.** `BehaviorSubject[T]` (architecture.md §State & reactivity) gives a single observable value with `Next`/`Subscribe`/`Value`, and SSE (D3) pushes its emissions. That is enough for *one* live value but not for a dashboard, which is overwhelmingly **derived** state: totals, quantiles, and filtered rollups that recompute when an upstream source *or* a user-controlled filter changes. Today each derived tile must hand-roll a goroutine that subscribes to N upstreams, recomputes on every `Next`, pushes into its own subject, and **unsubscribes on session GC**. That last step is the leak hazard architecture.md §90 and the CLAUDE.md bounded-registry invariant explicitly warn about — and it is the most repetitive, highest-risk code in any generated dashboard. Making the *generator* (agent or human) responsible for subscription lifecycle per tile is the wrong boundary.
 
@@ -227,4 +224,4 @@ smoothed := liquid.Throttle(metrics, 250*time.Millisecond)   // backpressure for
 
 ---
 
-**Settled decisions D1–D24 are binding. D25–D29 are proposed and await owner sign-off. See [HANDOFF.md](HANDOFF.md) for current state and build order.**
+**Settled decisions D1–D29 are binding. See [HANDOFF.md](HANDOFF.md) for current state and build order.**
