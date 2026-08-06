@@ -83,6 +83,11 @@ func NewLiveGenerator() (*LiveGenerator, error) {
 	}, nil
 }
 
+// Model returns the pinned model these figures are attributed to, so the
+// nightly gate can record it as baseline provenance and warn if a later run is
+// comparing against a baseline captured on a different model.
+func (g *LiveGenerator) Model() string { return g.model }
+
 // Generate asks the model for the component's files. On the first attempt prior
 // and diags are nil and the model sees only the task; on a repair attempt the
 // prior files and their diagnostics are folded into the message so the model

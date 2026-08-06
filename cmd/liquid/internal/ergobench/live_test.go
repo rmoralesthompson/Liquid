@@ -15,6 +15,14 @@ import (
 	"github.com/rmoralesthompson/liquid/cmd/liquid/internal/compiler"
 )
 
+// baselinePath is the committed nightly baseline the regression gate compares
+// against, relative to this package directory (where `go test` runs).
+const baselinePath = "testdata/ergonomics_baseline.json"
+
+// updateBaselineEnv, when set, switches the gate test into record mode: it
+// writes the baseline from the run instead of gating against it.
+const updateBaselineEnv = "LIQUID_ERGO_UPDATE_BASELINE"
+
 // The tests below split into three groups, all compiled only under `ergolive`:
 // pure request/response logic (no network), a stubbed end-to-end HTTP path
 // (deterministic, no API key), and the live ergonomics run (skips without a key).
@@ -179,31 +187,137 @@ func TestLiveErgonomics(t *testing.T) {
 		t.Skip("ANTHROPIC_API_KEY not set; skipping live ergonomics run")
 	}
 
-	n := 5
-	if v := os.Getenv("LIQUID_ERGO_SAMPLES"); v != "" {
-		parsed, err := strconv.Atoi(v)
-		if err != nil || parsed < 1 {
-			t.Fatalf("LIQUID_ERGO_SAMPLES = %q, want a positive integer", v)
-		}
-		n = parsed
+	gen := liveGenOrFatal(t)
+	stats, err := RunCorpus(context.Background(), func() Generator { return gen }, Corpus, envSamples(t), t.TempDir())
+	if err != nil {
+		t.Fatalf("RunCorpus: %v", err)
+	}
+	logStats(t, stats)
+}
+
+// TestNightlyRegressionGate is the nightly Tier B gate (ADR-0001, #71): it runs
+// the live corpus and fails if any task regressed past the tolerance band versus
+// the committed baseline. It skips without a key, so a bare `go test -tags
+// ergolive` still exercises the deterministic tests above.
+//
+// Two modes:
+//
+//   - record: with LIQUID_ERGO_UPDATE_BASELINE set, it writes
+//     testdata/ergonomics_baseline.json from this run and does NOT gate. This is
+//     how the first baseline and any deliberate re-baseline are captured — from a
+//     real run, never fabricated. Commit the resulting file.
+//   - gate (default): it compares against the committed baseline. A missing file
+//     skips (there is nothing to gate yet); a task with no baseline entry or a
+//     metric outside the band fails.
+//
+// The comparison is a band, not an exact assertion, so it does not flap on
+// ordinary sampling noise. Tune with LIQUID_ERGO_RATE_BAND (default 0.2, applied
+// to the three 0..1 rates) and LIQUID_ERGO_REPAIR_BAND (default 1.0, applied to
+// mean repairs). LIQUID_ERGO_SAMPLES sets the per-task sample count (default 5).
+func TestNightlyRegressionGate(t *testing.T) {
+	if os.Getenv("ANTHROPIC_API_KEY") == "" {
+		t.Skip("ANTHROPIC_API_KEY not set; skipping nightly regression gate")
 	}
 
+	gen := liveGenOrFatal(t)
+	n := envSamples(t)
+	stats, err := RunCorpus(context.Background(), func() Generator { return gen }, Corpus, n, t.TempDir())
+	if err != nil {
+		t.Fatalf("RunCorpus: %v", err)
+	}
+	logStats(t, stats)
+
+	if os.Getenv(updateBaselineEnv) != "" {
+		set := &BaselineSet{Model: gen.Model(), Samples: n, Tasks: make(map[string]Baseline, len(stats))}
+		for _, s := range stats {
+			set.Tasks[s.Task] = BaselineFromStats(s)
+		}
+		if err = set.Save(baselinePath); err != nil {
+			t.Fatalf("recording baseline: %v", err)
+		}
+		t.Logf("recorded baseline for %d task(s) to %s (model=%s, samples=%d); commit this file",
+			len(set.Tasks), baselinePath, set.Model, n)
+		return
+	}
+
+	set, err := LoadBaselineSet(baselinePath)
+	if err != nil {
+		t.Fatalf("loading baseline: %v", err)
+	}
+	if set == nil {
+		t.Skipf("no baseline recorded at %s; run once with %s=1 to record", baselinePath, updateBaselineEnv)
+	}
+	if set.Model != "" && set.Model != gen.Model() {
+		t.Logf("warning: baseline model %q != run model %q; comparison may not be like-for-like",
+			set.Model, gen.Model())
+	}
+
+	rateBand := envFloat(t, "LIQUID_ERGO_RATE_BAND", 0.2)
+	repairBand := envFloat(t, "LIQUID_ERGO_REPAIR_BAND", 1.0)
+	res := Gate(set, stats, rateBand, repairBand)
+
+	for _, task := range res.Missing {
+		t.Errorf("task %q has no baseline entry; record one with %s=1 before gating", task, updateBaselineEnv)
+	}
+	for task, regs := range res.Regressions {
+		for _, r := range regs {
+			t.Errorf("regression in %q: %s = %.2f, baseline %.2f (band %.2f)",
+				task, r.Metric, r.Got, r.Baseline, r.Band)
+		}
+	}
+	if res.OK() {
+		t.Logf("nightly gate passed: %d task(s) within band (rate=%.2f, repair=%.2f)",
+			len(stats), rateBand, repairBand)
+	}
+}
+
+// liveGenOrFatal builds the live generator or fails the test. LiveGenerator
+// holds no per-attempt state, so one instance serves every sample.
+func liveGenOrFatal(t *testing.T) *LiveGenerator {
+	t.Helper()
 	gen, err := NewLiveGenerator()
 	if err != nil {
 		t.Fatalf("NewLiveGenerator: %v", err)
 	}
-	// LiveGenerator holds no per-attempt state, so one instance serves every
-	// sample; RunN drives it sequentially.
-	newGen := func() Generator { return gen }
+	return gen
+}
 
-	ctx := context.Background()
-	for _, task := range Corpus {
-		samples, err := RunN(ctx, newGen, task, n, t.TempDir())
-		if err != nil {
-			t.Fatalf("RunN(%s): %v", task.Name, err)
-		}
-		s := Aggregate(task.Name, samples)
+// logStats emits one distribution line per task, the human-readable record of a
+// run that lands in the CI log regardless of the gate verdict.
+func logStats(t *testing.T, stats []Stats) {
+	t.Helper()
+	for _, s := range stats {
 		t.Logf("task=%s n=%d firstPassRate=%.2f greenRate=%.2f specMatchRate=%.2f meanRepairs=%.2f varRepairs=%.2f",
 			s.Task, s.N, s.FirstPassRate, s.GreenRate, s.SpecMatchRate, s.MeanRepairs, s.VarRepairs)
 	}
+}
+
+// envSamples reads LIQUID_ERGO_SAMPLES (default 5), failing on a non-positive or
+// unparseable value so a misconfigured nightly job is loud, not silently 5.
+func envSamples(t *testing.T) int {
+	t.Helper()
+	v := os.Getenv("LIQUID_ERGO_SAMPLES")
+	if v == "" {
+		return 5
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 {
+		t.Fatalf("LIQUID_ERGO_SAMPLES = %q, want a positive integer", v)
+	}
+	return n
+}
+
+// envFloat reads a float env var, falling back to def when unset and failing on
+// an unparseable value.
+func envFloat(t *testing.T, name string, def float64) float64 {
+	t.Helper()
+	v := os.Getenv(name)
+	if v == "" {
+		return def
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		t.Fatalf("%s = %q, want a float", name, v)
+	}
+	return f
 }

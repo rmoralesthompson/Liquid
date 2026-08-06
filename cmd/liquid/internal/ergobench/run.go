@@ -72,6 +72,25 @@ func RunN(ctx context.Context, newGen func() Generator, task Task, n int, dir st
 	return samples, nil
 }
 
+// RunCorpus runs every task in corpus n times through the loop, building a
+// fresh generator per sample via newGen, and returns the aggregated [Stats] per
+// task in corpus order. It is the shared driver behind both the on-demand log
+// run and the nightly gate — the caller supplies the generator (scripted and
+// deterministic per-PR, live nightly). Each task's samples are isolated in their
+// own subdirectory under dir.
+func RunCorpus(ctx context.Context, newGen func() Generator, corpus []Task, n int, dir string) ([]Stats, error) {
+	stats := make([]Stats, 0, len(corpus))
+	for _, task := range corpus {
+		taskDir := filepath.Join(dir, task.Name)
+		samples, err := RunN(ctx, newGen, task, n, taskDir)
+		if err != nil {
+			return nil, fmt.Errorf("task %s: %w", task.Name, err)
+		}
+		stats = append(stats, Aggregate(task.Name, samples))
+	}
+	return stats, nil
+}
+
 // writeModule scaffolds a component module in dir: a go.mod plus the
 // generator's emitted files. The module path is derived from the task name so
 // each attempt type-checks as its own package. When the task imports liquid

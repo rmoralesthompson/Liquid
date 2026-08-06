@@ -1,0 +1,85 @@
+name: Nightly Ergonomics (Tier B)
+
+# ADR-0001 / #71: the Tier B agent-ergonomics gate. It runs the real
+# generate → build → repair loop against the task corpus through a live model
+# and fails if any task regressed past the tolerance band versus the committed
+# baseline (cmd/liquid/internal/ergobench/testdata/ergonomics_baseline.json).
+#
+# It is deliberately OFF the PR critical path: a real model is stochastic and
+# costs tokens, so this runs on a schedule and on demand only (ADR-0001, "Two
+# tiers"). The deterministic Tier A / Layer 1 checks that DO gate every PR live
+# in the normal CI workflow.
+#
+# Recording the baseline: the gate needs a committed baseline to compare against.
+# Capture it from a real run — locally:
+#
+#   ANTHROPIC_API_KEY=… LIQUID_ERGO_UPDATE_BASELINE=1 \
+#     go test -v -tags ergolive -run TestNightlyRegressionGate \
+#     ./cmd/liquid/internal/ergobench
+#
+# then commit the written testdata/ergonomics_baseline.json — or trigger this
+# workflow with record=true and commit the uploaded artifact. Until a baseline
+# exists the gate skips (nothing to gate yet), so the first nightly is green and
+# informational.
+
+on:
+  schedule:
+    # 07:00 UTC daily — off-peak, after the day's merges have settled.
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+    inputs:
+      samples:
+        description: 'Samples per task (mean + variance are taken over these)'
+        required: false
+        default: '5'
+      record:
+        description: 'Record the baseline from this run instead of gating'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  # One nightly run at a time; a newer trigger supersedes an in-flight one.
+  group: nightly-ergonomics
+  cancel-in-progress: false
+
+jobs:
+  ergonomics:
+    name: Tier B regression gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Run Tier B ergonomics gate
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Empty on a scheduled run; set from the dispatch inputs on demand.
+          LIQUID_ERGO_SAMPLES: ${{ github.event.inputs.samples }}
+          LIQUID_ERGO_UPDATE_BASELINE: ${{ github.event.inputs.record == 'true' && '1' || '' }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::warning::ANTHROPIC_API_KEY secret is not set; skipping the Tier B ergonomics gate."
+            exit 0
+          fi
+          go test -v -tags ergolive -run TestNightlyRegressionGate \
+            ./cmd/liquid/internal/ergobench
+
+      - name: Upload recorded baseline
+        # On a record run, surface the written baseline as an artifact so it can
+        # be downloaded and committed (the gate never commits back to the repo).
+        if: ${{ github.event.inputs.record == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ergonomics-baseline
+          path: cmd/liquid/internal/ergobench/testdata/ergonomics_baseline.json
+          if-no-files-found: warn
