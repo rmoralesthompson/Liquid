@@ -57,9 +57,17 @@ func (e Event) Bind(dst any) error {
 	if v.Kind() != reflect.Pointer || v.IsNil() || v.Elem().Kind() != reflect.Struct {
 		return fmt.Errorf("liquid: Bind wants a non-nil pointer to a struct, got %T", dst)
 	}
-	structV := v.Elem()
+	return bindStruct(v.Elem(), e.fields)
+}
+
+// bindStruct fills structV from fields under the same case-insensitive,
+// string+int rules Bind documents. It is the shared core of Bind (D11) and the
+// D30 guard-argument builder, so a handler and its guard see a payload bound
+// identically. A field with an unbindable kind is a hard error, not a silent
+// skip — the same posture Bind takes.
+func bindStruct(structV reflect.Value, fields map[string]string) error {
 	t := structV.Type()
-	for name, value := range e.fields {
+	for name, value := range fields {
 		f, ok := fieldByFoldedName(t, name)
 		if !ok {
 			continue

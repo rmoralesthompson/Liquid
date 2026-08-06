@@ -74,6 +74,13 @@ const (
 	// path is liquid.Observe within Subscriptions(). Suppress a deliberate
 	// direct subscription with a //liquid:allow-subscribe comment.
 	CodeUnmanagedSubscription Code = "LSX017"
+	// CodeUnguardedAction reports an action that takes a client payload
+	// (func(e liquid.Event)) but declares no <Name>Guard boundary predicate and
+	// no closed-domain payload field, so nothing constrains its payload values
+	// at the dispatch seam (D30). A non-fatal warning (D13): the value axis of
+	// least privilege is where an agent-written handler is most likely to leave
+	// a gap, so the framework flags it without failing the build.
+	CodeUnguardedAction Code = "LSX018"
 )
 
 // Diagnostic is one structured compiler finding: the literal contract an

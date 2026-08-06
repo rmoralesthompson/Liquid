@@ -157,8 +157,13 @@ func TestBuildReportsClickBindingWithoutHydroIdRoot(t *testing.T) {
 func TestSubmitBindingCompilesToSubmitAttributeAndAllowlist(t *testing.T) {
 	dir := copyFixture(t, "renamer")
 
-	if diags := build(t, dir); len(diags) != 0 {
-		t.Fatalf("unexpected diagnostics: %+v", diags)
+	// renamer's Rename is an unguarded payload action, so it draws an LSX018
+	// warning (D30); that is expected and non-fatal — only an error would stop
+	// this binding from compiling.
+	for _, d := range build(t, dir) {
+		if d.Severity == compiler.SeverityError {
+			t.Fatalf("unexpected error diagnostic: %+v", d)
+		}
 	}
 
 	generated, err := os.ReadFile(filepath.Join(dir, "renamer_gen.go"))
@@ -186,8 +191,12 @@ func TestSubmitBindingCompilesToSubmitAttributeAndAllowlist(t *testing.T) {
 func TestFormReceivesAutoInjectedCSRFTokenInput(t *testing.T) {
 	dir := copyFixture(t, "renamer")
 
-	if diags := build(t, dir); len(diags) != 0 {
-		t.Fatalf("unexpected diagnostics: %+v", diags)
+	// The unguarded-action LSX018 warning (D30) is expected here and non-fatal;
+	// only an error would stop the CSRF input from being injected.
+	for _, d := range build(t, dir) {
+		if d.Severity == compiler.SeverityError {
+			t.Fatalf("unexpected error diagnostic: %+v", d)
+		}
 	}
 
 	tmplText := generatedTemplateText(t, filepath.Join(dir, "renamer_gen.go"))

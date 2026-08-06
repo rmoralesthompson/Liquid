@@ -97,7 +97,7 @@ func TestManifestReportsClickActionAndHydroRoot(t *testing.T) {
 		t.Errorf("Fields = %+v, want %+v", c.Fields, wantFields)
 	}
 	wantActions := []compiler.ManifestAction{
-		{Name: "Increment", Signature: "func()", Events: []string{"click"}},
+		{Name: "Increment", Signature: "func()", Events: []string{"click"}, ClosedDomains: map[string][]string{}},
 	}
 	if !reflect.DeepEqual(c.Actions, wantActions) {
 		t.Errorf("Actions = %+v, want %+v", c.Actions, wantActions)
@@ -109,7 +109,7 @@ func TestManifestReportsSubmitActionSignature(t *testing.T) {
 
 	c := graph.Components[0]
 	wantActions := []compiler.ManifestAction{
-		{Name: "Rename", Signature: "func(e liquid.Event)", TakesEvent: true, Events: []string{"submit"}},
+		{Name: "Rename", Signature: "func(e liquid.Event)", TakesEvent: true, Events: []string{"submit"}, ClosedDomains: map[string][]string{}},
 	}
 	if !reflect.DeepEqual(c.Actions, wantActions) {
 		t.Errorf("Actions = %+v, want %+v", c.Actions, wantActions)

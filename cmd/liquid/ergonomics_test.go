@@ -46,8 +46,10 @@ type ergonomicsCase struct {
 
 // ergonomicsCorpus is the Tier A representative set. It spans a parse-stage
 // error (LSX001), a template/struct mismatch (LSX004), two framework-contract
-// checks reachable only through vet (LSX011, LSX012), and both ends of the
-// D29 reactivity-leak severity split (LSX017 error and warning).
+// checks reachable only through vet (LSX011, LSX012), both ends of the D29
+// reactivity-leak severity split (LSX017 error and warning), and the D30
+// unguarded-payload-action warning (LSX018) — a valid component that draws a
+// non-fatal nudge, so the corpus exercises a go/types-positioned warning too.
 var ergonomicsCorpus = []ergonomicsCase{
 	{"malformed template", "unclosed", "build", "unclosed.lsx", 3, 6, "error", "LSX001"},
 	{"unknown field reference", "typo", "vet", "typo.lsx", 3, 10, "error", "LSX004"},
@@ -55,6 +57,7 @@ var ergonomicsCorpus = []ergonomicsCase{
 	{"unknown child selector", "ghostchild", "vet", "ghost.lsx", 2, 3, "error", "LSX012"},
 	{"leaked subscription", "leaks", "vet", "leaky.go", 19, 11, "error", "LSX017"},
 	{"captured subscription", "captured", "vet", "captured.go", 21, 41, "warning", "LSX017"},
+	{"unguarded payload action", "renamer", "vet", "renamer.go", 16, 19, "warning", "LSX018"},
 }
 
 func TestErgonomicsDiagnosticContract(t *testing.T) {
