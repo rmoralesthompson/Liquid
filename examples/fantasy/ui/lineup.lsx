@@ -1,0 +1,190 @@
+<main class="app">
+  <style>
+    /* ---- Gridiron theme: gunmetal steel + gentle neon green ---- */
+    :root {
+      --bg:        #14171c;
+      --bg-2:      #0f1216;
+      --panel:     #1c2129;
+      --panel-2:   #232933;
+      --line:      rgba(255,255,255,.08);
+      --line-2:    rgba(255,255,255,.14);
+      --fg:        #e8ecf1;
+      --fg-muted:  #8a94a3;
+      --fg-dim:    #5c6672;
+      --neon:      #35f58c;
+      --neon-soft: rgba(53,245,140,.16);
+      --neon-line: rgba(53,245,140,.42);
+      --radius:    16px;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh;
+      font-family: "Rajdhani", "Oswald", "Segoe UI", system-ui, -apple-system, sans-serif;
+      color: var(--fg); line-height: 1.45; -webkit-font-smoothing: antialiased;
+      background:
+        radial-gradient(120% 90% at 50% -10%, rgba(53,245,140,.10), rgba(53,245,140,0) 55%),
+        linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 100%);
+      background-attachment: fixed;
+    }
+    .app { max-width: 60rem; margin: 0 auto; padding: 1.75rem 1.1rem 4rem; }
+
+    /* ---- Brand bar ---- */
+    .brand {
+      display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+      padding: 1rem 1.3rem; margin-bottom: 1.6rem; border-radius: var(--radius);
+      background:
+        linear-gradient(180deg, var(--panel-2), var(--panel));
+      border: 1px solid var(--line);
+      box-shadow: 0 10px 30px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.05);
+      position: relative; overflow: hidden;
+    }
+    /* Faint yard-line motif behind the brand bar. */
+    .brand::after {
+      content: ""; position: absolute; inset: 0; pointer-events: none;
+      background: repeating-linear-gradient(90deg, transparent 0 46px, rgba(255,255,255,.035) 46px 48px);
+      -webkit-mask-image: linear-gradient(90deg, transparent, #000 40%, #000 60%, transparent);
+      mask-image: linear-gradient(90deg, transparent, #000 40%, #000 60%, transparent);
+    }
+    .brand__left { display: flex; align-items: center; gap: .85rem; z-index: 1; }
+    .brand__mark {
+      display: grid; place-items: center; width: 44px; height: 44px; flex: 0 0 auto;
+      border-radius: 12px; color: #06110b;
+      background: linear-gradient(160deg, var(--neon), #17c46a);
+      box-shadow: 0 0 0 1px var(--neon-line), 0 6px 18px rgba(53,245,140,.28);
+    }
+    .brand__mark svg { width: 26px; height: 26px; }
+    .brand__name {
+      margin: 0; font-size: 1.5rem; font-weight: 700; letter-spacing: 2.5px;
+      text-transform: uppercase; line-height: 1;
+    }
+    .brand__name em { font-style: normal; color: var(--neon); }
+    .brand__tag { margin: .28rem 0 0; font-size: .72rem; font-weight: 600; letter-spacing: 3px; text-transform: uppercase; color: var(--fg-dim); }
+    .brand__right { z-index: 1; text-align: right; }
+    .brand__week { font-size: .72rem; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: var(--neon); }
+    .brand__mgr  { font-size: .95rem; font-weight: 600; letter-spacing: .4px; color: var(--fg); }
+
+    /* ---- Panel ---- */
+    .panel {
+      border-radius: var(--radius);
+      background: linear-gradient(180deg, var(--panel-2), var(--panel));
+      border: 1px solid var(--line);
+      box-shadow: 0 12px 34px rgba(0,0,0,.38), inset 0 1px 0 rgba(255,255,255,.04);
+      padding: 1.2rem 1.25rem 1.35rem;
+    }
+    .panel__head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
+    .panel__kicker { display: block; font-size: .68rem; font-weight: 700; letter-spacing: 3px; text-transform: uppercase; color: var(--neon); }
+    .panel__title { margin: .18rem 0 0; font-size: 1.2rem; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; }
+
+    .live-pill {
+      display: inline-flex; align-items: center; gap: .45rem; flex: 0 0 auto;
+      padding: .34rem .7rem; border-radius: 999px; font-size: .68rem; font-weight: 700;
+      letter-spacing: 1.6px; color: var(--neon);
+      background: var(--neon-soft); border: 1px solid var(--neon-line);
+    }
+    .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--neon); animation: pulse 1.6s infinite; }
+    @keyframes pulse {
+      0%   { box-shadow: 0 0 0 0 rgba(53,245,140,.5); }
+      70%  { box-shadow: 0 0 0 8px rgba(53,245,140,0); }
+      100% { box-shadow: 0 0 0 0 rgba(53,245,140,0); }
+    }
+
+    /* ---- Roster rows ---- */
+    .roster { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .5rem; }
+    .player {
+      display: grid; align-items: center; gap: .85rem;
+      grid-template-columns: 2.1rem 48px 1fr auto;
+      padding: .6rem .75rem; border-radius: 12px;
+      background: rgba(255,255,255,.02);
+      border: 1px solid var(--line);
+      transition: border-color .18s ease, background .18s ease, transform .18s ease;
+    }
+    .player:hover { border-color: var(--neon-line); background: rgba(53,245,140,.05); transform: translateX(2px); }
+
+    .player__pos {
+      display: grid; place-items: center; width: 2.1rem; height: 1.7rem;
+      border-radius: 7px; font-size: .72rem; font-weight: 700; letter-spacing: .6px;
+      color: var(--fg-muted); background: rgba(255,255,255,.04); border: 1px solid var(--line-2);
+    }
+
+    .avatar { display: block; width: 48px; height: 48px; flex: 0 0 auto; color: #2a3038; }
+    .avatar svg { display: block; width: 48px; height: 48px; }
+    /* Team colours the headshot disk keys off (fill="currentColor"). */
+    .avatar--kc  { color: #c8102e; }
+    .avatar--sf  { color: #9a0000; }
+    .avatar--phi { color: #004c54; }
+    .avatar--mia { color: #008e97; }
+    .avatar--dal { color: #17335e; }
+    .avatar--cin { color: #d64309; }
+    .avatar--atl { color: #a71930; }
+    .avatar--buf { color: #00338d; }
+
+    .player__id { min-width: 0; display: flex; flex-direction: column; gap: .12rem; }
+    .player__name {
+      font-size: 1.02rem; font-weight: 700; letter-spacing: .3px; color: var(--fg);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .player__meta { font-size: .74rem; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; color: var(--fg-muted); }
+    .player__dot { color: var(--fg-dim); margin: 0 .1rem; }
+
+    .player__proj { display: flex; flex-direction: column; align-items: flex-end; gap: .02rem; }
+    .player__pts {
+      font-size: 1.55rem; font-weight: 700; line-height: 1; letter-spacing: .2px;
+      color: var(--neon); font-variant-numeric: tabular-nums;
+      text-shadow: 0 0 16px rgba(53,245,140,.35);
+    }
+    .player__unit { font-size: .6rem; font-weight: 700; letter-spacing: 2px; color: var(--fg-dim); }
+
+    /* ---- Footer total ---- */
+    .roster__foot {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-top: 1rem; padding: .85rem 1rem 0; border-top: 1px solid var(--line);
+    }
+    .roster__foot-label { font-size: .72rem; font-weight: 700; letter-spacing: 2.5px; text-transform: uppercase; color: var(--fg-muted); }
+    .roster__foot-value {
+      font-size: 1.7rem; font-weight: 700; color: var(--neon);
+      font-variant-numeric: tabular-nums; text-shadow: 0 0 18px rgba(53,245,140,.4);
+    }
+
+    .footer { margin-top: 1.75rem; text-align: center; font-size: .74rem; letter-spacing: .4px; color: var(--fg-dim); }
+    .footer strong { color: var(--fg-muted); font-weight: 700; }
+
+    @media (max-width: 30rem) {
+      .player { grid-template-columns: 1.9rem 40px 1fr auto; gap: .6rem; }
+      .avatar, .avatar svg { width: 40px; height: 40px; }
+      .player__pts { font-size: 1.35rem; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      * { animation: none !important; transition: none !important; }
+    }
+  </style>
+
+  <!-- Shared SVG defs: one clip path the team headshots reference. -->
+  <svg width="0" height="0" aria-hidden="true" focusable="false" style="position:absolute">
+    <defs>
+      <clipPath id="avatarClip"><circle cx="24" cy="24" r="23"></circle></clipPath>
+    </defs>
+  </svg>
+
+  <header class="brand">
+    <div class="brand__left">
+      <span class="brand__mark">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3c-3.3 0-6 .6-7.6 2.2C2.8 6.8 2.2 9.5 2.2 12s.6 5.2 2.2 6.8C6 20.4 8.7 21 12 21s6-.6 7.6-2.2c1.6-1.6 2.2-4.3 2.2-6.8s-.6-5.2-2.2-6.8C18 3.6 15.3 3 12 3zm0 3.4c2 0 3.5.3 3.5.3l.3 1.4H8.2l.3-1.4S10 6.4 12 6.4zm-3.9 3h7.8l-.9 5.1s-1.4.5-3 .5-3-.5-3-.5l-.9-5.1zM8 9.4l1 5.3M16 9.4l-1 5.3M9.5 10.6h5M9.9 12.4h4.2"/></svg>
+      </span>
+      <div>
+        <h1 class="brand__name">Grid<em>iron</em></h1>
+        <p class="brand__tag">Fantasy Football</p>
+      </div>
+    </div>
+    <div class="brand__right">
+      <div class="brand__week">{{ Week }} · Starters</div>
+      <div class="brand__mgr">{{ Manager }}</div>
+    </div>
+  </header>
+
+  <app-roster></app-roster>
+
+  <footer class="footer">
+    <p>Projections stream live over SSE from the server — <strong>no client charting or JS framework</strong>.</p>
+  </footer>
+</main>

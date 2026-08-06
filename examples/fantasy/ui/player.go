@@ -1,0 +1,35 @@
+// Package ui holds the fantasy-football example's components — the directory
+// liquid build compiles. Wiring that needs the generated Template methods
+// lives in the parent main package, so a from-scratch build always type-checks.
+package ui
+
+import (
+	"fmt"
+	"strings"
+)
+
+// Player is one row in the starting lineup. Every field is preformatted on the
+// server (templates do no arithmetic): Points is the display string, and
+// TeamClass is the lowercased team code the stylesheet keys the headshot's
+// team colour off (e.g. "kc" -> .avatar--kc).
+type Player struct {
+	Name      string
+	Team      string
+	Pos       string
+	Number    string
+	Points    string
+	TeamClass string
+}
+
+// MakePlayer formats a raw projection into a display Player. The feed (in
+// package main) owns the numbers; the ui package owns how they render.
+func MakePlayer(name, team, pos string, number int, points float64) Player {
+	return Player{
+		Name:      name,
+		Team:      team,
+		Pos:       pos,
+		Number:    fmt.Sprintf("#%d", number),
+		Points:    fmt.Sprintf("%.1f", points),
+		TeamClass: strings.ToLower(team),
+	}
+}
