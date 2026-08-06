@@ -10,6 +10,14 @@ Server-driven UI in Go: an Angular-style component model, LiveView-style interac
 
 **Status:** early implementation — the core runtime, the `.lsx` compiler, and the dev server are in place, with a full example app in [`examples/dashboard`](examples/dashboard). Design phase complete (24 settled decisions).
 
+## Quickstart
+
+New to Liquid? The [Getting-started guide](docs/getting-started.md) takes you
+from an empty machine to a running, interactive component you built yourself —
+install the CLI, scaffold a component with `liquid generate`, wire a minimal
+app, then build a click counter and a value the server pushes live over SSE. No
+prior Liquid knowledge assumed; every command is copy-pasteable.
+
 ## Documentation
 
 - [Architecture](docs/architecture.md) — the authoritative spec
