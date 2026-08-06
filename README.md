@@ -18,6 +18,8 @@ install the CLI, scaffold a component with `liquid generate`, wire a minimal
 app, then build a click counter and a value the server pushes live over SSE. No
 prior Liquid knowledge assumed; every command is copy-pasteable.
 
+**Limitations:** v0.1 is single-node (in-memory sessions; multi-node needs sticky sessions), SSE-only, and `v0.x` (no backward-compat promise). See [what Liquid v0.1 does not do yet](docs/limitations.md) before adopting.
+
 ## Documentation
 
 - [Architecture](docs/architecture.md) — the authoritative spec
