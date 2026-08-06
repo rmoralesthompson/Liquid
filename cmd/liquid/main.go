@@ -1,6 +1,3 @@
-// Command liquid is the Liquid CLI: the AOT template compiler (build/vet),
-// the component scaffolder (generate), the dev server (dev), and the
-// editor language server (lsp).
 package main
 
 import (
