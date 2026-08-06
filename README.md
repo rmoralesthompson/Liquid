@@ -10,6 +10,8 @@ Server-driven UI in Go: an Angular-style component model, LiveView-style interac
 
 **Status:** early implementation — the core runtime, the `.lsx` compiler, and the dev server are in place, with a full example app in [`examples/dashboard`](examples/dashboard). Design phase complete (24 settled decisions).
 
+**Limitations:** v0.1 is single-node (in-memory sessions; multi-node needs sticky sessions), SSE-only, and `v0.x` (no backward-compat promise). See [what Liquid v0.1 does not do yet](docs/limitations.md) before adopting.
+
 ## Documentation
 
 - [Architecture](docs/architecture.md) — the authoritative spec
