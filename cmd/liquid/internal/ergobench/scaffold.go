@@ -42,13 +42,14 @@ func writeLiquidStub(dir string) error {
 // match the real core so components resolve `github.com/rmoralesthompson/liquid/core`.
 const liquidStubGoMod = "module github.com/rmoralesthompson/liquid\n\ngo 1.23\n"
 
-// liquidCoreStub stands in for the real liquid/core package. Liquid is
-// greenfield — no core package is built yet — so a task that follows an
-// observable (managed Observe, the guardrail trap) can only compile against a
-// stub that resolves the import path vet and manifest need. It carries the
-// observable surface (BehaviorSubject, Observe, Subscription) and no behavior,
-// mirroring compiler/testdata's stub so the harness scores the same D25/D29
-// contract the real compiler enforces.
+// liquidCoreStub stands in for the real liquid/core package. A task that
+// follows an observable (managed Observe, the guardrail trap) compiles against
+// this stub rather than the repo's real core, so the harness stays
+// deterministic and self-contained: a temp module needs no absolute path back
+// to the checkout's core package to resolve the import vet and manifest read.
+// It carries the observable surface (BehaviorSubject, Observe, Subscription)
+// and no behavior, mirroring compiler/testdata's stub so the harness scores the
+// same D25/D29 contract the real compiler enforces.
 const liquidCoreStub = `// Package liquid is a fixture stub standing in for the real core package:
 // vet needs the observable types and Observe to resolve at their real import
 // path so the D29 reactivity-leak check can identify Subscribe calls. It

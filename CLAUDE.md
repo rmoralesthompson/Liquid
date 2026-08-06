@@ -1,6 +1,6 @@
 # Liquid — Project Guidelines
 
-Liquid is a server-driven UI framework for Go (Angular-style component model, LiveView-style interactivity, agent-first tooling). **Greenfield: no Go code exists yet.** The design lives in `docs/`:
+Liquid is a server-driven UI framework for Go (Angular-style component model, LiveView-style interactivity, agent-first tooling). The design lives in `docs/`:
 
 - `docs/REPORT.md` — analysis of the original design material; known defects to avoid
 - `docs/architecture.md` — authoritative architecture spec
