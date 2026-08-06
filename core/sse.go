@@ -15,9 +15,15 @@ const hydroSSEPath = "/hydro-sse"
 
 // sseMsg is one pushed patch: a component re-render addressed to its
 // [data-hydro-id] boundary, mirroring the fetch envelope's patch half (D19).
+// A `patch` frame also carries a freshly minted CSRF token (#52) so a page
+// kept alive purely by server push tracks the session's sliding idle deadline
+// instead of the render's fixed horizon — the SSE analog of the event
+// envelope's re-mint (#46, D15). It is empty on `swap` frames, which deliver
+// deferred content that carries its own render's token (#26).
 type sseMsg struct {
 	HydroID string `json:"hydroId"`
 	Patch   string `json:"patch"`
+	CSRF    string `json:"csrf,omitempty"`
 }
 
 // sseFrame is one typed event on a stream: `patch` and `swap` in every
@@ -119,12 +125,19 @@ func (a *App) startPump(sess *hydroSession, st *hydroState, hydroID string) (sto
 			}
 			sess.dispatch.Lock()
 			patch, err := a.renderStateLocked(st, sess.id)
+			// Re-mint in lockstep with the render (D15/D2, #52): a page kept
+			// alive only by server push must track the session's sliding idle
+			// deadline the way the event path does (#46), or its token outlives
+			// the render's fixed horizon and the next user event 403s with no
+			// self-heal. The runtime restamps this into the liquid-csrf meta
+			// tag and the patched subtree's csrf_token inputs (refreshCSRF).
+			csrf := mintCSRF(a.csrfSecret, sess.id, a.limits.SessionIdleTimeout, a.now())
 			sess.dispatch.Unlock()
 			if err != nil {
 				a.logger.Error("rendering pushed patch", "hydroIdPrefix", tokenPrefix(hydroID), "error", err)
 				continue
 			}
-			frame, err := patchFrame(sseMsg{HydroID: hydroID, Patch: patch})
+			frame, err := patchFrame(sseMsg{HydroID: hydroID, Patch: patch, CSRF: csrf})
 			if err != nil {
 				a.logger.Error("encoding sse patch", "hydroIdPrefix", tokenPrefix(hydroID), "error", err)
 				continue

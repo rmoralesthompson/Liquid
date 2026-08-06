@@ -347,7 +347,17 @@ still reflects the *pre-decision* behavior described.
    the runtime's `refreshCSRF` (`core/runtime.js`) restamps the `liquid-csrf` meta tag
    and the swapped subtree's `csrf_token` inputs, and `liquidtest`'s `Patch.CSRFToken()`
    exposes the rotated token; pinned by
-   `TestEventPatchReMintsCSRFTokenTrackingTheSlidingWindow`.
+   `TestEventPatchReMintsCSRFTokenTrackingTheSlidingWindow`. **The SSE push path re-mints
+   symmetrically ([#52](https://github.com/rmoralesthompson/Liquid/issues/52)):** the
+   pump mints a fresh token on every pushed patch under the same dispatch mutex
+   (`sseMsg.CSRF`, `core/sse.go`), the runtime's SSE `patch` handler restamps it via the
+   same `refreshCSRF`, and `liquidtest`'s `Push.CSRFToken()` exposes it. Without it a page
+   kept alive purely by server push outlived the render's fixed horizon and then wedged
+   the next user event on a 403 with no self-heal — the refused event bails before the
+   re-mint, so the stale meta tag never refreshed and every subsequent interaction 403'd
+   until a full reload. Pinned by `TestPushedPatchReMintsCSRFTrackingTheSlidingWindow`
+   (core, sliding-window proof) and `TestPushedPatchCarriesADispatchableCSRFToken`
+   (`liquidtest`, the pushed token dispatches end-to-end).
 3. **`Secure` cookie vs `http://localhost` dev serving** (D15): the cookie is always set
    `Secure` (`core/hydro.go:367`). Modern browsers treat `localhost` as a trustworthy
    origin and accept it, so `liquid dev` works; but any plain-HTTP **non-localhost**

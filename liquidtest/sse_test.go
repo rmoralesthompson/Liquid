@@ -329,6 +329,54 @@ func TestConcurrentEmissionsAndDispatchConverge(t *testing.T) {
 	}
 }
 
+// A page kept alive purely by server push must stay interactive: the pushed
+// patch carries a re-minted CSRF token (#52) that itself dispatches, so the
+// next user event is accepted rather than 403'd against a token frozen at the
+// original render. Without the push-path re-mint the meta tag never refreshes
+// and, once the original token's horizon passes, every interaction wedges.
+func TestPushedPatchCarriesADispatchableCSRFToken(t *testing.T) {
+	feed := liquid.NewBehaviorSubject(0)
+	app := liquid.New()
+	if err := app.Provide(feed); err != nil {
+		t.Fatalf("Provide: %v", err)
+	}
+	if err := app.Route("/", &ticker{}); err != nil {
+		t.Fatalf("Route: %v", err)
+	}
+	h := liquidtest.New(t, app)
+
+	page := h.Get("/")
+	stream := h.Stream()
+	defer stream.Close()
+
+	feed.Next(5)
+
+	// Find the push carrying the emitted state; connect-time priming and
+	// coalescing make the exact sequence timing-dependent (see awaitPush).
+	var matched *liquidtest.Push
+	for range 5 {
+		push := stream.Next()
+		if push.HydroID == page.HydroID() && push.Text("#reading") == "5" {
+			matched = push
+			break
+		}
+	}
+	if matched == nil {
+		t.Fatal("no pushed patch showed the emitted state 5")
+	}
+	token := matched.CSRFToken()
+	if token == "" {
+		t.Fatal("pushed patch carried no re-minted csrf token (#52)")
+	}
+
+	// The token the stream delivered must itself dispatch — end to end through
+	// the real streaming and event paths — proving a push-only page stays
+	// usable without a full-page reload.
+	if patch := page.Fire("Bump", liquidtest.CSRF(token)); patch.Code != http.StatusOK {
+		t.Errorf("event carrying the pushed token = %d, want %d", patch.Code, http.StatusOK)
+	}
+}
+
 func TestSubjectEmissionReachesTheSessionAsAPushedPatch(t *testing.T) {
 	feed := liquid.NewBehaviorSubject(7)
 	h := newMetricHarness(t, feed)

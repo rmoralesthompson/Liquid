@@ -42,8 +42,19 @@ type Push struct {
 	HydroID string
 	// Patch is the pushed component render.
 	Patch string
-	doc   *html.Node
+	// CSRF is the token the push re-minted (#52), which the runtime restamps
+	// into the liquid-csrf meta tag and the patched subtree's csrf_token
+	// inputs so a push-only page's token tracks the session's sliding idle
+	// window instead of wedging on the next user event.
+	CSRF string
+	doc  *html.Node
 }
+
+// CSRFToken returns the token this push re-minted (#52) — the SSE analog of
+// [Patch.CSRFToken] (#46). Fire an event with it via [CSRF] to assert a
+// push-only page stays dispatchable. It is "" for a build or frame carrying
+// none.
+func (p *Push) CSRFToken() string { return p.CSRF }
 
 // Text returns the trimmed text content of the first pushed element matching
 // a simple selector, failing the test when nothing matches.
@@ -151,6 +162,7 @@ func (s *Stream) dispatch(data string) {
 	var msg struct {
 		HydroID string `json:"hydroId"`
 		Patch   string `json:"patch"`
+		CSRF    string `json:"csrf"`
 	}
 	if err := json.Unmarshal([]byte(data), &msg); err != nil {
 		return
@@ -160,7 +172,7 @@ func (s *Stream) dispatch(data string) {
 		return
 	}
 	select {
-	case s.events <- Push{h: s.h, HydroID: msg.HydroID, Patch: msg.Patch, doc: doc}:
+	case s.events <- Push{h: s.h, HydroID: msg.HydroID, Patch: msg.Patch, CSRF: msg.CSRF, doc: doc}:
 	case <-s.stop:
 		// Close was called with the buffer full: drop the push and keep
 		// draining, so the handler is never wedged mid-write on the pipe.

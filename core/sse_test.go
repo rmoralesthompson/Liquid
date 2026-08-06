@@ -1,9 +1,11 @@
 package liquid
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -210,6 +212,86 @@ func (b *boundlessSubscriber) Template() string { return `<p>{{ .Reading }}</p>`
 // Subscriptions declares a binding the component has no patch boundary for.
 func (b *boundlessSubscriber) Subscriptions() []Subscription {
 	return []Subscription{Observe(b.Feed, func(v int) { b.Reading = v })}
+}
+
+// readPush blocks for one frame the pump fans onto a white-box stream and
+// decodes it, failing the test if none arrives. It reads stream.ch directly —
+// the pump's output — rather than driving the serveHydroSSE wire path, which
+// liquidtest already covers.
+func readPush(t *testing.T, stream *sseStream) sseMsg {
+	t.Helper()
+	select {
+	case f := <-stream.ch:
+		var msg sseMsg
+		if err := json.Unmarshal([]byte(f.data), &msg); err != nil {
+			t.Fatalf("decoding pushed frame %q: %v", f.data, err)
+		}
+		return msg
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for a pushed frame")
+		return sseMsg{}
+	}
+}
+
+// White-box like the #46 event-path proof (hardening_test.go): the sliding
+// window needs the tickClock, and a pump kept alive only by push is exactly
+// the invisible-at-the-wire fact this is about. It is the SSE analog of
+// TestEventPatchReMintsCSRFTokenTrackingTheSlidingWindow.
+func TestPushedPatchReMintsCSRFTrackingTheSlidingWindow(t *testing.T) {
+	idle := time.Hour
+	clock := &tickClock{t: time.Unix(1_700_000_000, 0)}
+	feed := NewBehaviorSubject(0)
+	app := newPushApp(t, feed, WithLimits(Limits{SessionIdleTimeout: idle}))
+	app.now = clock.now
+
+	sess := renderWB(t, app)
+	original := sess.csrf
+
+	// Attach a stream as the runtime's EventSource does. The connect-time
+	// prime renders at the current clock — still the render instant, since we
+	// have not advanced it — so draining it here is deterministic and leaves
+	// the buffer empty for the emission below.
+	stream := newSSEStream()
+	if !app.hydro.attachStream(sess.id, stream, app.now(), idle, app.limits.MaxStreamsPerSession) {
+		t.Fatal("attachStream on a live session returned false")
+	}
+	defer stream.close()
+	if connect := readPush(t, stream); connect.CSRF == "" {
+		t.Fatal("connect-time push carried no csrf token (#52)")
+	}
+
+	// The page is now kept alive only by server push. Time slides toward the
+	// original token's horizon; the pushed patch must carry a token minted
+	// against the current clock, not the render's fixed expiry.
+	clock.t = clock.t.Add(40 * time.Minute)
+	feed.Next(1)
+
+	msg := readPush(t, stream)
+	if msg.CSRF == "" {
+		t.Fatal("pushed patch carried no re-minted csrf token (#52)")
+	}
+	if msg.CSRF == original {
+		t.Error("pushed patch re-served the original token; it must re-mint against the current clock")
+	}
+	expiry, err := strconv.ParseInt(strings.SplitN(msg.CSRF, ":", 2)[0], 10, 64)
+	if err != nil {
+		t.Fatalf("pushed token %q is not expiry:signature: %v", msg.CSRF, err)
+	}
+	if want := clock.t.Add(idle).Unix(); expiry != want {
+		t.Errorf("pushed token expiry = %d, want %d (now + idle window)", expiry, want)
+	}
+
+	// The point of #52: a push-only page stays usable past the original
+	// horizon. Advance beyond where the original expired — the pushed token
+	// still validates for the session while the original now does not, so the
+	// next user event dispatches instead of wedging on a 403.
+	clock.t = clock.t.Add(50 * time.Minute) // 90 min since render; original expired at 60
+	if validCSRF(app.csrfSecret, original, sess.id, app.now()) {
+		t.Fatal("test premise broken: the original token has not expired at 90 minutes")
+	}
+	if !validCSRF(app.csrfSecret, msg.CSRF, sess.id, app.now()) {
+		t.Error("the pushed re-minted token does not validate past the original horizon; a push-only page would still wedge (#52)")
+	}
 }
 
 func TestSlowStreamIsDisconnectedRatherThanBlocked(t *testing.T) {
