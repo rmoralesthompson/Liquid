@@ -1,0 +1,38 @@
+<section [hydroId] id="roster" class="panel" aria-live="polite" aria-label="Live starting lineup">
+  <div class="panel__head">
+    <div class="panel__title-wrap">
+      <span class="panel__kicker">Starters</span>
+      <h2 class="panel__title">This Week's Lineup</h2>
+    </div>
+    <span class="live-pill" aria-hidden="true"><span class="live-dot"></span>LIVE</span>
+  </div>
+
+  <ol class="roster" role="list">
+    <li class="player" role="listitem" *goFor="let p of Players">
+      <span class="player__pos">{{ $p.Pos }}</span>
+      <span class="avatar avatar--{{ $p.TeamClass }}">
+        <svg viewBox="0 0 48 48" aria-hidden="true">
+          <g clip-path="url(#avatarClip)">
+            <rect width="48" height="48" fill="currentColor"></rect>
+            <circle cx="24" cy="19" r="8.5" fill="#ffffff" opacity="0.92"></circle>
+            <path d="M8 45c0-8.6 7.2-14 16-14s16 5.4 16 14z" fill="#ffffff" opacity="0.92"></path>
+          </g>
+          <circle cx="24" cy="24" r="22.5" fill="none" stroke="#35f58c" stroke-width="1.5" opacity="0.85"></circle>
+        </svg>
+      </span>
+      <span class="player__id">
+        <span class="player__name">{{ $p.Name }}</span>
+        <span class="player__meta">{{ $p.Team }} <span class="player__dot">·</span> {{ $p.Pos }} <span class="player__dot">·</span> {{ $p.Number }}</span>
+      </span>
+      <span class="player__proj">
+        <span class="player__pts">{{ $p.Points }}</span>
+        <span class="player__unit">PROJ</span>
+      </span>
+    </li>
+  </ol>
+
+  <div class="roster__foot">
+    <span class="roster__foot-label">Projected Total</span>
+    <span id="lineup-total" class="roster__foot-value">{{ Total }}</span>
+  </div>
+</section>
