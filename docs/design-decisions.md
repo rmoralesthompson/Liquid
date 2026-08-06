@@ -1,8 +1,8 @@
 # Liquid — Design Decisions
 
-Decision log for the framework. Decisions D1–D29 are settled and binding unless explicitly revisited.
+Decision log for the framework. Decisions D1–D30 are settled and binding unless explicitly revisited.
 
-**D1–D9 accepted 2026-08-02; D10–D17 accepted 2026-08-02; D18–D24 accepted 2026-08-02; D25–D29 accepted 2026-08-05** (owner: Richard).
+**D1–D9 accepted 2026-08-02; D10–D17 accepted 2026-08-02; D18–D24 accepted 2026-08-02; D25–D29 accepted 2026-08-05; D30 accepted 2026-08-06** (owner: Richard).
 
 ## Settled
 
@@ -245,6 +245,36 @@ smoothed := liquid.Throttle(metrics, 250*time.Millisecond)   // backpressure for
 - **Suppression.** A `//liquid:allow-subscribe` comment on the call's line or the line above silences it, for the rare deliberate hand-managed subscription.
 - **Best-effort.** A directory that will not load (a bare template with no module) is skipped rather than erroring — false negatives are acceptable (D29 scope), and the template gating already reports the real problem.
 
+### D30. Value-constrained action dispatch: payload contracts at the dispatch seam (#79)
+
+*Accepted 2026-08-06. Extends D10's least-privilege guarantee from the method axis to the payload-value axis, staying inside v0.1's settled dispatch order (D15) — no wire-format or transport change. Accepted but unbuilt.*
+
+**Problem.** The compile-time action allowlist (D10) constrains *which* method a client may invoke — the category axis of least privilege. But an action handler `func(e liquid.Event)` receives a client-chosen payload, and nothing at the dispatch seam constrains those argument *values*: payload validation lives inside handler bodies, where it is easy to forget. A missing check on an effectful action is a silent authorization gap — not a compile error, not a refused request. This is the *value* axis of the same least-privilege principle D10 enforces on the method axis.
+
+**Decision.** Add a declared, boundary-enforced contract for payload values, evaluated **after the allowlist + CSRF check (D15)** and **before the handler runs**:
+
+1. **Closed-domain payload params.** A payload field typed as a named type with a defined set of typed constants (the idiomatic Go const-set) is enumerated by the compiler via `go/types`; an out-of-set value is refused at the seam (400) before any handler branch runs. The dangerous value is unrepresentable at the boundary.
+
+2. **Boundary guards.** A pure boolean predicate over the payload, declared as a convention method `func (c *T) <Action>Guard(p <Payload>) bool` — discovered by the compiler exactly as D10 discovers the action itself. It runs at the seam before any effect fires; a failing guard is a 400 and the handler never sees the payload.
+
+3. **Vet warning for unguarded effectful actions.** An effectful action taking an unbounded scalar payload with no closed domain and no guard earns a build-time **warning** (D13 severity, non-fatal), surfaced through `liquid vet` and recorded in the manifest (D26).
+
+Net: "the handler should validate its payload" becomes a declared contract the compiler, `liquid vet`, and the manifest all see — validation moves from convention to a checked seam, consistent with how D10 already treats the method axis.
+
+**Open questions resolved (from #79).**
+- **Guard declaration → convention method.** `func (c *T) <Action>Guard(payload) bool`. Chosen over a struct tag (stringly-typed, no arbitrary boolean logic, no cross-field reach) and a registration-time API (runtime, weaker compile/manifest visibility). It mirrors D10's method-discovery idiom, is compile-time visible via `go/types`, and stays agent-legible.
+- **Closed domain → reuse the Go const-set idiom.** A named type + typed `const` block, enumerated by the compiler — no new marker type. Stays close to stdlib (project stance) and reads as idiomatic Go.
+- **Unguarded default → warning, non-fatal.** Matches the D13/D29 warning-first posture ("don't fail the build on a maybe"); LSX017 already exercises the D13 warning severity. An opt-in strict mode is deferred until a concrete need (D8/D4 "add when a real case appears" stance).
+- **Ordering → confirmed: after CSRF, before handler.** The only order consistent with D15's refusal chain — an unauthenticated request is refused at CSRF and learns nothing about payload contracts.
+
+**Scope & non-goals.**
+- Touches the **dispatch seam** (`core/hydro.go`: value-check slot after allowlist + CSRF, before handler invocation), the **compiler** (`cmd/liquid/internal/compiler`: recognize const-set payload field types, emit the manifest entry and the unguarded-effectful warning), and the **manifest** (D26: per-action payload contract — closed domains + guard presence).
+- **Not** a general schema/validation DSL — closed domains and a pure boolean predicate only. Richer constraint languages are deferred until a real case appears (D8/D4).
+- Guards are **pure** by contract; a guard performing I/O or mutation is a misuse the predicate signature discourages but v0.1 does not statically enforce (a candidate future `vet` check, not in scope here).
+- Depends on D26 (manifest) for the contract-surfacing half; the seam refusal and const-set enumeration stand alone.
+
+**Rationale.** Extends an invariant the framework already enforces on one axis to the axis where agent-generated handlers are most likely to leave a gap — an out-of-contract payload reaching an effect. Composes with what exists (D10 discovery idiom, D15 refusal order, D13 diagnostics, D26 manifest) at low architectural cost, and keeps the "framework catches the class of bug the author is prone to" agent-first posture consistent between the method and value axes.
+
 ---
 
-**Settled decisions D1–D29 are binding. See [HANDOFF.md](HANDOFF.md) for current state and build order.**
+**Settled decisions D1–D30 are binding. See [HANDOFF.md](HANDOFF.md) for current state and build order.**
