@@ -152,11 +152,17 @@
       }
     });
     source.addEventListener("patch", (e) => {
-      const { hydroId, patch } = JSON.parse(e.data);
+      const { hydroId, patch, csrf } = JSON.parse(e.data);
       const root = document.querySelector(
         `[data-hydro-id="${CSS.escape(hydroId)}"]`,
       );
-      if (root) applyPatch(root, patch);
+      if (!root) return;
+      applyPatch(root, patch);
+      // Restamp the push's re-minted token (#52), mirroring the fetch path
+      // (#46): a page driven purely by server push must keep its CSRF token
+      // sliding with the session the stream is keeping alive, or the next
+      // user event 403s against a token frozen at the original render.
+      if (csrf) refreshCSRF(root, csrf);
     });
     // A deferred component's content arriving (#26): unlike a patch, this
     // replaces the fallback slot element itself, so the component's own root
