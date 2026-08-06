@@ -72,16 +72,22 @@ func RunN(ctx context.Context, newGen func() Generator, task Task, n int, dir st
 	return samples, nil
 }
 
-// writeModule scaffolds a component module in dir: a minimal go.mod plus the
+// writeModule scaffolds a component module in dir: a go.mod plus the
 // generator's emitted files. The module path is derived from the task name so
-// each attempt type-checks as its own package.
+// each attempt type-checks as its own package. When the task imports liquid
+// core (NeedsCore), the go.mod replaces core with a local stub written
+// alongside it, so the import resolves without a published core package.
 func writeModule(dir string, task Task, files []File) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("creating module dir: %w", err)
 	}
-	gomod := fmt.Sprintf("module ergobench.local/%s\n\ngo 1.23\n", task.Name)
-	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(gomod), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(moduleGoMod(task)), 0o644); err != nil {
 		return fmt.Errorf("writing go.mod: %w", err)
+	}
+	if task.NeedsCore {
+		if err := writeLiquidStub(dir); err != nil {
+			return err
+		}
 	}
 	for _, f := range files {
 		p := filepath.Join(dir, f.Name)
