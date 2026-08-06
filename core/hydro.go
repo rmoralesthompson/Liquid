@@ -552,12 +552,27 @@ func payloadContractOK(inst reflect.Value, act action, payload map[string]string
 	return inst.Method(act.guardIdx).Call([]reflect.Value{p})[0].Bool()
 }
 
-// outOfDomain reports whether the payload posts a value outside a field's
-// closed domain (D30), matching field keys case-insensitively as the binder
-// does (D11).
+// outOfDomain reports whether the payload violates a field's closed domain
+// (D30). It iterates the declared domains — not the posted keys — and fails
+// closed: a domain field that is absent, or present with an out-of-set value,
+// is out of contract. Checking only posted keys would let a client bypass the
+// domain by omitting the field, delivering the zero value (outside the set) to
+// the handler and breaking the seam's promise that a closed-domain field is
+// always one of its enumerated values. Field keys are matched
+// case-insensitively as the binder does (D11).
 func outOfDomain(act action, payload map[string]string) bool {
-	for k, val := range payload {
-		if allowed, ok := act.domains[strings.ToLower(k)]; ok && !slices.Contains(allowed, val) {
+	if len(act.domains) == 0 {
+		return false
+	}
+	// Fold posted keys once so each declared domain field is resolved whether
+	// or not the client cased or posted it.
+	posted := make(map[string]string, len(payload))
+	for k, v := range payload {
+		posted[strings.ToLower(k)] = v
+	}
+	for field, allowed := range act.domains {
+		val, ok := posted[field]
+		if !ok || !slices.Contains(allowed, val) {
 			return true
 		}
 	}

@@ -180,3 +180,23 @@ func TestPayloadContractRefusesUnbindableGuardPayload(t *testing.T) {
 		t.Fatalf("status = %d, want %d: a payload that will not bind into the guard must be refused (D30)", status, http.StatusBadRequest)
 	}
 }
+
+func TestPayloadContractRefusesOmittedDomainField(t *testing.T) {
+	srv := newServer(t, "/", &mover{})
+	sess := renderInteractive(t, srv, "/")
+
+	// Omitting the closed-domain Dir must not bypass the domain: an absent
+	// field carries the zero value (""), which is outside {up,down}. Checking
+	// only posted keys would admit it and let Move run with an out-of-domain
+	// direction, breaking the seam's promise (D30). The guard-passing Step
+	// isolates the domain axis as the sole reason for refusal.
+	status, _ := fireContract(t, srv, sess, map[string]string{"step": "2"})
+
+	if status != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d: omitting a closed-domain field must be refused, not admitted as the zero value (D30)", status, http.StatusBadRequest)
+	}
+	// The refused event must not have touched the live instance.
+	if _, env := fireContract(t, srv, sess, map[string]string{"dir": "up", "step": "5"}); !strings.Contains(env.Patch, `<span id="pos">5</span>`) {
+		t.Errorf("patch = %q, want pos 5: the field-omitting event must not have dispatched", env.Patch)
+	}
+}
