@@ -54,6 +54,10 @@ type Task struct {
 	// CapN bounds repair iterations: after CapN failed repairs the sample is
 	// scored as gave-up (ADR-0001: "capped at N, N = give-up").
 	CapN int
+	// NeedsCore signals the task's component imports liquid core, so its
+	// scaffold gets the local core stub and a replace directive (see
+	// moduleGoMod). Greenfield and [input]-wiring tasks leave it false.
+	NeedsCore bool
 }
 
 // Expectation is the structural oracle a green output is scored against. Only
