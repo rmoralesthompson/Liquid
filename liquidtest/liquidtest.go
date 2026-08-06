@@ -1,8 +1,3 @@
-// Package liquidtest is the component test harness (D23): render a component
-// through a real App, query the resulting HTML, fire allowlisted actions,
-// and assert on the returned patch or envelope. It drives the same HTTP
-// runtime seam a browser does — no framework internals are reached into —
-// so "it passes in liquidtest" means the wire behavior is right.
 package liquidtest
 
 import (

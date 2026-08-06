@@ -1,6 +1,3 @@
-// Package liquid is the Liquid runtime: the component model, router, and
-// (in later slices) the hydro event loop. Components live and execute on the
-// server; the browser receives rendered HTML.
 package liquid
 
 // Component is a server-side UI component. Exported struct fields are
