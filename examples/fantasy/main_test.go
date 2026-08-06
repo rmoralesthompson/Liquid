@@ -2,6 +2,7 @@ package main
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -11,6 +12,22 @@ import (
 	"github.com/rmoralesthompson/liquid/examples/fantasy/ui"
 	"github.com/rmoralesthompson/liquid/liquidtest"
 )
+
+// expectedTotal sums the players' formatted projections the same way
+// Roster.Total does, so assertions never hardcode a figure tied to the
+// randomly generated lineup.
+func expectedTotal(t *testing.T, players []ui.Player) string {
+	t.Helper()
+	var sum float64
+	for _, p := range players {
+		v, err := strconv.ParseFloat(p.Points, 64)
+		if err != nil {
+			t.Fatalf("unparseable Points %q: %v", p.Points, err)
+		}
+		sum += v
+	}
+	return strconv.FormatFloat(sum, 'f', 1, 64)
+}
 
 // newHarness builds the real app around a test-owned board, so tests drive the
 // projection feed deterministically instead of racing the once-a-second walk.
@@ -31,15 +48,22 @@ func TestRosterRendersSeededLineup(t *testing.T) {
 		t.Fatalf("GET / = %d, want 200\n--- body ---\n%s", page.Code, page.Body)
 	}
 	// The roster renders its seeded lineup straight off the injected board —
-	// no [input] and no OnInit (children skip it).
-	for _, want := range []string{"Patrick Mahomes", "Travis Kelce", "avatar--kc", "avatar--phi"} {
-		if !strings.Contains(page.Body, want) {
-			t.Errorf("page missing %q\n--- body ---\n%s", want, page.Body)
-		}
+	// no [input] and no OnInit (children skip it). Names and teams are
+	// randomly generated fictional values (never real), so assert on the
+	// deterministic seed rather than any hardcoded name.
+	seeded := playersOf(seedLineup())
+	if rows := strings.Count(page.Body, `class="player__pos"`); rows != len(seeded) {
+		t.Errorf("rendered %d player rows, want %d", rows, len(seeded))
+	}
+	if !strings.Contains(page.Body, seeded[0].Name) {
+		t.Errorf("page missing generated player name %q\n--- body ---\n%s", seeded[0].Name, page.Body)
+	}
+	if !strings.Contains(page.Body, "avatar--"+seeded[0].TeamClass) {
+		t.Errorf("page missing team headshot class %q", "avatar--"+seeded[0].TeamClass)
 	}
 	// The footer total is summed on the server from the seeded projections.
-	if got := page.Text("#lineup-total"); got != "158.0" {
-		t.Errorf(`Text("#lineup-total") = %q, want the seeded sum "158.0"`, got)
+	if got, want := page.Text("#lineup-total"), expectedTotal(t, seeded); got != want {
+		t.Errorf(`Text("#lineup-total") = %q, want the seeded sum %q`, got, want)
 	}
 	if page.Text("h1") == "" {
 		t.Error("page renders no h1 heading")
@@ -56,9 +80,10 @@ func TestProjectionUpdateIsPushedOverSSE(t *testing.T) {
 		t.Fatalf("Stream() = %d, want 200", stream.Code)
 	}
 
-	// Bump one projection by +10 and republish: the new total is 168.0.
+	// Bump one projection by +10 and republish; the footer total moves with it.
 	updated := seedLineup()
 	updated[0].points += 10
+	want := expectedTotal(t, playersOf(updated))
 	board.Next(playersOf(updated))
 
 	// Connecting the stream primes a current-state frame first; scan a few
@@ -70,12 +95,12 @@ func TestProjectionUpdateIsPushedOverSSE(t *testing.T) {
 			continue
 		}
 		got := push.Text("#lineup-total")
-		if got == "168.0" {
+		if got == want {
 			return
 		}
 		seen = append(seen, got)
 	}
-	t.Fatalf(`no SSE push showed #lineup-total "168.0"; saw %v`, seen)
+	t.Fatalf(`no SSE push showed #lineup-total %q; saw %v`, want, seen)
 }
 
 func TestRosterRegionDeclaresAriaLive(t *testing.T) {

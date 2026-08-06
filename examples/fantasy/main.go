@@ -39,20 +39,68 @@ type starter struct {
 	points          float64
 }
 
-// seedLineup is the starting roster — fixed so the first render (and the
-// tests) are deterministic; the feed walks the projections once it starts.
-// One slot per fantasy position: QB, two RB, three WR, TE, and a FLEX.
+// ---------------------------------------------------------------------------
+// IRON-CLAD RULE: every player and team in this demo is FICTIONAL. Never use
+// the name or likeness of a real person (athlete or otherwise) or a real
+// organisation. Names and teams are assembled at random from the invented
+// token pools below; any resemblance to a real person or club is coincidental.
+// Do not replace them with real ones.
+// ---------------------------------------------------------------------------
+
+// firstNames and lastNames are invented tokens the generator combines into
+// fictional player names. None is a real athlete.
+var firstNames = []string{
+	"Dax", "Cole", "Ronan", "Jace", "Kai", "Zane", "Trey", "Cade",
+	"Nash", "Rhett", "Gunnar", "Wyatt", "Axel", "Rex", "Brock", "Knox",
+	"Ryder", "Beckett", "Colt", "Tanner", "Slate", "Dane", "Cash", "Bo",
+}
+
+var lastNames = []string{
+	"Voss", "Kessler", "Marek", "Sloan", "Rourke", "Calder", "Vance", "Hollis",
+	"Thorne", "Brant", "Rennick", "Ashby", "Corwin", "Sable", "Faulk", "Grady",
+	"Locke", "Merrow", "Halloran", "Kade", "Dorne", "Vale", "Ryker", "Stade",
+}
+
+// team is a fictional franchise: a short code (also the stylesheet's colour
+// key, lowercased -> .avatar--irn) and its display colour. All invented.
+type team struct {
+	code, color string
+}
+
+var teams = []team{
+	{"IRN", "#5b6470"}, {"APX", "#c8102e"}, {"BLZ", "#d64309"}, {"FRS", "#0e8a92"},
+	{"NOV", "#7c3aed"}, {"HVK", "#17335e"}, {"RGE", "#9a1b30"}, {"RFT", "#2563eb"},
+}
+
+// lineupShape is the fixed starting-lineup: one slot per fantasy position with
+// a baseline projection. Names, teams, and numbers are drawn at random per
+// slot — QB, two RB, three WR, TE, and a FLEX.
+var lineupShape = []struct {
+	pos  string
+	base float64
+}{
+	{"QB", 22.5}, {"RB", 24.0}, {"RB", 19.5}, {"WR", 21.0},
+	{"WR", 19.0}, {"WR", 20.0}, {"TE", 14.0}, {"FLX", 17.0},
+}
+
+// seedLineup builds the starting roster with randomly generated fictional
+// names and teams (see the IRON-CLAD RULE above). It draws from a fixed PRNG
+// seed so the roster is deterministic — the first paint and the tests are
+// stable — while still being assembled at random, never hand-picked.
 func seedLineup() []starter {
-	return []starter{
-		{"Patrick Mahomes", "KC", "QB", 15, 22.4},
-		{"Christian McCaffrey", "SF", "RB", 23, 24.8},
-		{"Saquon Barkley", "PHI", "RB", 26, 19.6},
-		{"Tyreek Hill", "MIA", "WR", 10, 21.1},
-		{"CeeDee Lamb", "DAL", "WR", 88, 18.9},
-		{"Ja'Marr Chase", "CIN", "WR", 1, 20.3},
-		{"Travis Kelce", "KC", "TE", 87, 13.7},
-		{"Josh Allen", "BUF", "FLX", 17, 17.2},
+	r := rand.New(rand.NewPCG(1487, 9973)) // fixed seed: deterministic lineup
+	out := make([]starter, len(lineupShape))
+	for i, slot := range lineupShape {
+		name := firstNames[r.IntN(len(firstNames))] + " " + lastNames[r.IntN(len(lastNames))]
+		out[i] = starter{
+			name:   name,
+			team:   teams[r.IntN(len(teams))].code,
+			pos:    slot.pos,
+			number: r.IntN(98) + 1,
+			points: slot.base + (r.Float64()*2-1)*2.5,
+		}
 	}
+	return out
 }
 
 // playersOf renders the raw lineup into display Players.

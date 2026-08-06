@@ -34,6 +34,12 @@ needed after editing a `.lsx` template or a component struct.
 
 ### The data flow
 
+> **All players and teams are fictional.** `seedLineup` assembles names and
+> franchises at random from invented token pools — it never uses the name or
+> likeness of a real person or organisation, and must not be changed to. A
+> fixed PRNG seed keeps the generated roster deterministic (stable first paint
+> and tests) without hand-picking anyone.
+
 `main.go` owns the raw lineup (`seedLineup`) and the feed. `driveProjections`
 random-walks each player's projected points once a second and republishes the
 whole lineup through a `BehaviorSubject[[]ui.Player]`; the `Roster` child

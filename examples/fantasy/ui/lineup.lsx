@@ -109,15 +109,15 @@
 
     .avatar { display: block; width: 48px; height: 48px; flex: 0 0 auto; color: #2a3038; }
     .avatar svg { display: block; width: 48px; height: 48px; }
-    /* Team colours the headshot disk keys off (fill="currentColor"). */
-    .avatar--kc  { color: #c8102e; }
-    .avatar--sf  { color: #9a0000; }
-    .avatar--phi { color: #004c54; }
-    .avatar--mia { color: #008e97; }
-    .avatar--dal { color: #17335e; }
-    .avatar--cin { color: #d64309; }
-    .avatar--atl { color: #a71930; }
-    .avatar--buf { color: #00338d; }
+    /* Fictional team colours the headshot disk keys off (fill="currentColor"). */
+    .avatar--irn { color: #5b6470; }
+    .avatar--apx { color: #c8102e; }
+    .avatar--blz { color: #d64309; }
+    .avatar--frs { color: #0e8a92; }
+    .avatar--nov { color: #7c3aed; }
+    .avatar--hvk { color: #17335e; }
+    .avatar--rge { color: #9a1b30; }
+    .avatar--rft { color: #2563eb; }
 
     .player__id { min-width: 0; display: flex; flex-direction: column; gap: .12rem; }
     .player__name {
