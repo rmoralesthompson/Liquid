@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -46,6 +47,17 @@ const sessionCookieName = "liquid_session"
 // as the event endpoint is concerned.
 type ActionProvider interface {
 	Actions() []string
+}
+
+// PayloadDomainProvider is implemented by generated code that carries the D30
+// closed-domain constraints an action's payload struct declares: per action
+// name, the (case-folded) payload field mapped to the enumerated set of values
+// the dispatch seam admits. Reflection cannot see a Go const-set, so the
+// compiler enumerates it via go/types and emits it here for the seam to
+// enforce (a value outside the set is refused 400, before the handler). A
+// component with no closed-domain payload field never generates this method.
+type PayloadDomainProvider interface {
+	PayloadDomains() map[string]map[string][]string
 }
 
 // hydroState is one live interactive component instance, registered at render
@@ -439,11 +451,22 @@ func stringFieldIndex(t reflect.Type, name string) int {
 }
 
 // action is one dispatchable allowlist entry: the handler's method index and
-// whether it takes the liquid.Event payload (D11), both resolved once at
-// registration.
+// whether it takes the liquid.Event payload (D11), plus its D30 payload
+// contract — a guard method and any closed-domain constraints — all resolved
+// once at registration.
 type action struct {
 	idx        int
 	takesEvent bool
+	// guardIdx is the method index of the <Name>Guard convention method (D30),
+	// or -1 when the action declares no guard.
+	guardIdx int
+	// guardArg is the guard's payload-struct parameter type, used to bind the
+	// wire payload into the value the guard predicate receives; nil without a
+	// guard.
+	guardArg reflect.Type
+	// domains maps a case-folded payload field to the enumerated value set the
+	// seam admits (D30 closed domains), or nil when the action constrains none.
+	domains map[string][]string
 }
 
 // eventType is the reflect shape of the liquid.Event handler parameter.
@@ -463,6 +486,10 @@ func resolveActions(v reflect.Value) (map[string]action, error) {
 	if hydroIDField(v.Elem().Type()) < 0 {
 		return nil, fmt.Errorf("component %s declares actions but has no HydroID string field to patch against", structName)
 	}
+	var domainsByAction map[string]map[string][]string
+	if dp, ok := v.Interface().(PayloadDomainProvider); ok {
+		domainsByAction = dp.PayloadDomains()
+	}
 	actions := make(map[string]action)
 	for _, name := range ap.Actions() {
 		m, ok := v.Type().MethodByName(name)
@@ -474,9 +501,82 @@ func resolveActions(v reflect.Value) (map[string]action, error) {
 			return nil, fmt.Errorf("allowlisted action %s.%s must have signature func() or func(e liquid.Event), got %s",
 				structName, name, m.Type)
 		}
-		actions[name] = action{idx: m.Index, takesEvent: takesEvent}
+		act := action{idx: m.Index, takesEvent: takesEvent, guardIdx: -1, domains: foldDomains(domainsByAction[name])}
+		if gm, ok := v.Type().MethodByName(name + "Guard"); ok {
+			// A <Name>Guard convention method (D30) that does not match the
+			// pure-predicate shape is a broken contract, not a silent no-op:
+			// fail registration loudly, exactly as a mis-shaped action does.
+			if gm.Type.NumIn() != 2 || gm.Type.In(1).Kind() != reflect.Struct ||
+				gm.Type.NumOut() != 1 || gm.Type.Out(0).Kind() != reflect.Bool {
+				return nil, fmt.Errorf("payload guard %s.%s must have signature func(p <Payload>) bool, got %s",
+					structName, name+"Guard", gm.Type)
+			}
+			act.guardIdx = gm.Index
+			act.guardArg = gm.Type.In(1)
+		}
+		actions[name] = act
 	}
 	return actions, nil
+}
+
+// dispatchArgs builds the argument list for a handler call: the sole
+// liquid.Event a func(e liquid.Event) handler takes (D11), or nil for a bare
+// func() handler.
+func dispatchArgs(act action, r *http.Request, payload map[string]string, reply *eventReply) []reflect.Value {
+	if !act.takesEvent {
+		return nil
+	}
+	return []reflect.Value{reflect.ValueOf(Event{
+		Ctx:    NewCtx(r, nil),
+		fields: payload,
+		reply:  reply,
+	})}
+}
+
+// payloadContractOK reports whether the payload satisfies the action's D30
+// contract: every closed-domain field carries an in-set value, and the
+// boundary guard (if any) admits it. A payload that will not bind into the
+// guard's parameter is out of contract. It calls the guard on the live
+// instance, so callers hold the dispatch lock (D20).
+func payloadContractOK(inst reflect.Value, act action, payload map[string]string) bool {
+	if outOfDomain(act, payload) {
+		return false
+	}
+	if act.guardIdx < 0 {
+		return true
+	}
+	p := reflect.New(act.guardArg).Elem()
+	if err := bindStruct(p, payload); err != nil {
+		return false
+	}
+	return inst.Method(act.guardIdx).Call([]reflect.Value{p})[0].Bool()
+}
+
+// outOfDomain reports whether the payload posts a value outside a field's
+// closed domain (D30), matching field keys case-insensitively as the binder
+// does (D11).
+func outOfDomain(act action, payload map[string]string) bool {
+	for k, val := range payload {
+		if allowed, ok := act.domains[strings.ToLower(k)]; ok && !slices.Contains(allowed, val) {
+			return true
+		}
+	}
+	return false
+}
+
+// foldDomains lower-cases the field keys of a per-action closed-domain map so
+// the seam can match them against posted payload keys case-insensitively, the
+// same fold the payload binder uses (D11). It returns nil for an empty map so
+// an action without closed domains carries no allocation.
+func foldDomains(domains map[string][]string) map[string][]string {
+	if len(domains) == 0 {
+		return nil
+	}
+	folded := make(map[string][]string, len(domains))
+	for field, values := range domains {
+		folded[strings.ToLower(field)] = values
+	}
+	return folded
 }
 
 // Envelope is the hydro event response (D19): an HTML patch to swap at the
@@ -551,14 +651,7 @@ func (a *App) serveHydroEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	reply := &eventReply{}
-	var args []reflect.Value
-	if act.takesEvent {
-		args = []reflect.Value{reflect.ValueOf(Event{
-			Ctx:    NewCtx(r, nil),
-			fields: ev.Payload,
-			reply:  reply,
-		})}
-	}
+	args := dispatchArgs(act, r, ev.Payload, reply)
 
 	sess.dispatch.Lock()
 	// A deferred instance whose background load has not published yet is not
@@ -567,6 +660,17 @@ func (a *App) serveHydroEvent(w http.ResponseWriter, r *http.Request) {
 	if !st.ready {
 		sess.dispatch.Unlock()
 		http.NotFound(w, r)
+		return
+	}
+	// D30 value axis: enforce the payload contract after the allowlist and CSRF
+	// and before the handler (D15) — a value outside a field's closed domain,
+	// or one the boundary guard rejects, is refused 400 so the handler never
+	// sees an out-of-contract payload. It runs under the dispatch lock because
+	// the guard may read component state, serializing with this instance's
+	// events (D20).
+	if !payloadContractOK(st.inst, act, ev.Payload) {
+		sess.dispatch.Unlock()
+		http.Error(w, "payload rejected", http.StatusBadRequest)
 		return
 	}
 	st.inst.Method(act.idx).Call(args)

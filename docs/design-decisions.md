@@ -247,7 +247,7 @@ smoothed := liquid.Throttle(metrics, 250*time.Millisecond)   // backpressure for
 
 ### D30. Value-constrained action dispatch: payload contracts at the dispatch seam (#79)
 
-*Accepted 2026-08-06. Extends D10's least-privilege guarantee from the method axis to the payload-value axis, staying inside v0.1's settled dispatch order (D15) — no wire-format or transport change. Accepted but unbuilt.*
+*Accepted 2026-08-06. Extends D10's least-privilege guarantee from the method axis to the payload-value axis, staying inside v0.1's settled dispatch order (D15) — no wire-format or transport change. Built (#79): the seam refusal (`core/hydro.go`), const-set enumeration + generated `PayloadDomains` + the LSX018 unguarded-action warning (`cmd/liquid/internal/compiler`), and the manifest payload contract (D26).*
 
 **Problem.** The compile-time action allowlist (D10) constrains *which* method a client may invoke — the category axis of least privilege. But an action handler `func(e liquid.Event)` receives a client-chosen payload, and nothing at the dispatch seam constrains those argument *values*: payload validation lives inside handler bodies, where it is easy to forget. A missing check on an effectful action is a silent authorization gap — not a compile error, not a refused request. This is the *value* axis of the same least-privilege principle D10 enforces on the method axis.
 
@@ -274,6 +274,8 @@ Net: "the handler should validate its payload" becomes a declared contract the c
 - Depends on D26 (manifest) for the contract-surfacing half; the seam refusal and const-set enumeration stand alone.
 
 **Rationale.** Extends an invariant the framework already enforces on one axis to the axis where agent-generated handlers are most likely to leave a gap — an out-of-contract payload reaching an effect. Composes with what exists (D10 discovery idiom, D15 refusal order, D13 diagnostics, D26 manifest) at low architectural cost, and keeps the "framework catches the class of bug the author is prone to" agent-first posture consistent between the method and value axes.
+
+**Implementation note (#79).** In v0.1 the only per-action payload *type* the compiler can see statically is the guard's parameter struct — a `func(e liquid.Event)` handler's own payload is the untyped `liquid.Event`. So both mechanisms anchor on the guard's payload struct: closed domains are its const-set-typed fields (enumerated and enforced automatically), and the guard predicate is the author's custom check over the same struct. Writing `func (c *T) <Action>Guard(p P) bool` is therefore how an action opts into value-axis enforcement; a const-set field of `P` is refused for free, `return true` opts into only the const-set check. Const-set refusal needs generated data (reflection cannot enumerate a Go const-set), carried by a generated `PayloadDomains` method the seam reads at registration; guard presence is resolved by reflection at registration, no generated code. LSX018 warns on any unguarded `func(e liquid.Event)` action — the v0.1 proxy for "effectful action with an unbounded payload," since no effect-tracking exists yet.
 
 ---
 

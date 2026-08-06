@@ -52,11 +52,14 @@ func TestManifestJSONEmitsAStableEnvelope(t *testing.T) {
 	}
 
 	action := comp["actions"].([]any)[0].(map[string]any)
-	if keys := sortedKeys(action); !slicesEqual(keys, []string{"events", "name", "signature", "takesEvent"}) {
-		t.Errorf("action keys = %v, want [events name signature takesEvent]", keys)
+	if keys := sortedKeys(action); !slicesEqual(keys, []string{"closedDomains", "events", "guard", "name", "signature", "takesEvent"}) {
+		t.Errorf("action keys = %v, want [closedDomains events guard name signature takesEvent]", keys)
 	}
 	if action["name"] != "Increment" || action["signature"] != "func()" || action["takesEvent"] != false {
 		t.Errorf("action = %v, want Increment func() takesEvent=false", action)
+	}
+	if action["guard"] != false {
+		t.Errorf("action guard = %v, want false: Increment declares no payload guard (D30)", action["guard"])
 	}
 }
 

@@ -93,6 +93,13 @@ type ManifestAction struct {
 	// Events are the binding kinds that wire this handler (click, submit),
 	// sorted and de-duplicated.
 	Events []string `json:"events"`
+	// Guard reports a <Name>Guard boundary predicate (D30): a pure check the
+	// dispatch seam runs over this action's payload before the handler.
+	Guard bool `json:"guard"`
+	// ClosedDomains maps a payload field (as declared) to the enumerated value
+	// set the seam admits (D30); an empty, non-null map when the action
+	// constrains no field.
+	ClosedDomains map[string][]string `json:"closedDomains"`
 }
 
 // Manifest builds the component graph for dir. It first runs the same
@@ -186,6 +193,7 @@ func manifestPackage(ctx context.Context, dir string) ([]ManifestComponent, erro
 
 		interactive, actions := projectDirectives(tmpl.sa, sigByName)
 		comp.Interactive = interactive
+		attachContracts(facts, decl.Struct, actions)
 		if len(actions) > 0 {
 			comp.Actions = actions
 		}
@@ -237,6 +245,27 @@ func projectDirectives(sa *SourceAnalysis, sigByName map[string]Member) (interac
 		actions = append(actions, *act)
 	}
 	return interactive, actions
+}
+
+// attachContracts fills each action's D30 payload contract — guard presence
+// and closed domains — from the package's go/types facts, joining the manifest
+// projection to the same contract discovery the seam and vet use. Every action
+// gets a non-null ClosedDomains map so an agent never special-cases null; an
+// action with no closed domain simply carries an empty one.
+func attachContracts(facts *Facts, structName string, actions []ManifestAction) {
+	names := make([]string, len(actions))
+	for i := range actions {
+		names[i] = actions[i].Name
+	}
+	contracts := facts.ActionContracts(structName, names)
+	for i := range actions {
+		c := contracts[actions[i].Name]
+		actions[i].Guard = c.Guard
+		actions[i].ClosedDomains = c.Domains
+		if actions[i].ClosedDomains == nil {
+			actions[i].ClosedDomains = map[string][]string{}
+		}
+	}
 }
 
 // templateFacts is one paired template's path and its raw-source scan, kept

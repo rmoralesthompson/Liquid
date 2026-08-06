@@ -1,0 +1,4 @@
+<div [hydroId]>
+  <span id="pos">{{ Pos }}</span>
+  <button (click)="Move">move</button>
+</div>

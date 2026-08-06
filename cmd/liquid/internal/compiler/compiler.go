@@ -37,7 +37,11 @@ func Build(ctx context.Context, dir string) ([]Diagnostic, error) {
 	if err != nil {
 		return nil, err
 	}
-	return append(diags, leaks...), nil
+	unguarded, err := vetActionGuards(ctx, dir)
+	if err != nil {
+		return nil, err
+	}
+	return append(append(diags, leaks...), unguarded...), nil
 }
 
 // Vet runs the same diagnostic checks as Build on every .lsx file under dir
@@ -54,7 +58,11 @@ func Vet(ctx context.Context, dir string) ([]Diagnostic, error) {
 	if err != nil {
 		return nil, err
 	}
-	return append(diags, leaks...), nil
+	unguarded, err := vetActionGuards(ctx, dir)
+	if err != nil {
+		return nil, err
+	}
+	return append(append(diags, leaks...), unguarded...), nil
 }
 
 // vetSubscriptions runs the D29 reactivity-leak check (VetSubscriptions) once
@@ -202,6 +210,18 @@ func (c *%s) Actions() []string {
 	return []string{%s}
 }
 `, structName, structName, quoteAll(actions))
+	}
+
+	if domains := payloadDomainsLiteral(ctx, filepath.Dir(lsxPath), structName, actions); domains != "" {
+		generated += fmt.Sprintf(`
+// PayloadDomains returns the closed-domain payload constraints compiled from
+// %s's action guards (D30): per action, the payload field mapped to the
+// enumerated value set the dispatch seam admits. Reflection cannot see a Go
+// const-set, so the seam reads it from here.
+func (c *%s) PayloadDomains() map[string]map[string][]string {
+	return %s
+}
+`, structName, structName, domains)
 	}
 
 	formatted, err := format.Source([]byte(generated))
