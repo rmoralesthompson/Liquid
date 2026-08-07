@@ -6,6 +6,48 @@ of a date; items graduate when a concrete need appears (the D8/D4 "add it when a
 real case appears" stance). For what the *current* release does not do yet, see
 [`limitations.md`](limitations.md).
 
+## v1.0 — production ready (active)
+
+The target after v0.1.0: a **feature-complete, production-ready** release that
+also **commits the public API** (backward-compatibility guarantees begin at 1.0,
+D24). v1.0 ships **single-node** by default; the Redis/multi-node backend is
+built but kept **additive and optional** (ADR-0002), so horizontal scaling can
+be turned on without a rewrite when load demands it. Tracked in the
+[v1.0 milestone](https://github.com/rmoralesthompson/Liquid/milestone/2).
+
+Sequenced so each workstream lands as its own PR; the four feature workstreams
+open with a design ADR before implementation.
+
+**Operational hardening (no design fork — first):**
+1. **Production HTTP serving** — graceful shutdown, SSE connection draining,
+   server timeouts, TLS ([#101](https://github.com/rmoralesthompson/Liquid/issues/101)).
+2. **Observability** — health/readiness endpoints + a pluggable, dependency-free
+   metrics seam ([#102](https://github.com/rmoralesthompson/Liquid/issues/102)).
+3. **Production deployment guide** ([#103](https://github.com/rmoralesthompson/Liquid/issues/103)).
+
+**Features:**
+4. **`(input)` / `(change)` events** — extends D12 through the same allowlist +
+   payload-contract path ([#104](https://github.com/rmoralesthompson/Liquid/issues/104)).
+5. **Forms & validation framework** — *design ADR first*
+   ([#105](https://github.com/rmoralesthompson/Liquid/issues/105)).
+6. **DOM diffing / morph** — *design ADR first*
+   ([#106](https://github.com/rmoralesthompson/Liquid/issues/106)).
+7. **WebSocket transport** alongside SSE — *design ADR first*; pulled forward
+   from v0.2 ([#107](https://github.com/rmoralesthompson/Liquid/issues/107)).
+8. **Auth & durable sessions** — auth/authz plus the external session store that
+   implements the `HydroState` `Snapshot()`/`Restore()` seam (also brings
+   multi-node online additively); *design ADR first*; pulled forward from v0.2
+   ([#108](https://github.com/rmoralesthompson/Liquid/issues/108)).
+
+**Cut:**
+9. **API-stability review & `v1.0.0` tag** — commit the public surface, migration
+   notes, backward-compat policy from 1.0
+   ([#109](https://github.com/rmoralesthompson/Liquid/issues/109)).
+
+> The Redis-backed sessions and WebSocket items below were originally scoped for
+> v0.2; both are **pulled forward into v1.0** (#108, #107) so that horizontal
+> scaling and a low-latency transport are available in the production release.
+
 ## v0.2
 
 ### Redis-backed session persistence (multi-node)
