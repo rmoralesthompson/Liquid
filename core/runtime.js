@@ -3,11 +3,14 @@
 (() => {
   "use strict";
 
-  // applyPatch swaps the innerHTML at the component's [hydroId] boundary for
-  // the server's re-render (D14), preserving focus by element id and never
-  // overwriting the focused input's in-flight value (D21). The boundary
-  // element itself stays in place — a known v0.1 limitation is that a patch
-  // does not update attributes on the [hydroId] element itself.
+  // applyPatch reconciles the component's [hydroId] subtree with the server's
+  // re-render (D14). It morphs the new HTML into the live DOM in place with
+  // Idiomorph (#106, ADR-0005) — preserving element identity, scroll position,
+  // media playback, and CSS-transition state that a wholesale innerHTML swap
+  // would discard — then restores the focused input's in-flight value and
+  // selection (D21), which a re-render must never clobber. Nodes are matched by
+  // id, so keyed lists reorder rather than rebuild. The boundary element itself
+  // stays in place; a patch still does not update attributes on it.
   function applyPatch(root, patch) {
     const active = document.activeElement;
     const focusId = active && active.id ? active.id : null;
@@ -33,7 +36,7 @@
       console.error("liquid: patch carries no element to swap in", patch);
       return;
     }
-    root.replaceChildren(...next.childNodes);
+    Idiomorph.morph(root, next, { morphStyle: "innerHTML" });
 
     if (!focusId) return;
     const el = document.getElementById(focusId);

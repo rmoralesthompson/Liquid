@@ -439,6 +439,10 @@ func (a *App) serveScript(w http.ResponseWriter, r *http.Request) bool {
 		a.serveRuntimeScript(w)
 		return true
 	}
+	if r.URL.Path == morphScriptPath {
+		a.serveMorphScript(w)
+		return true
+	}
 	if devMode && r.URL.Path == devScriptPath {
 		a.serveDevScript(w)
 		return true

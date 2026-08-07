@@ -37,6 +37,24 @@ func (a *App) serveRuntimeScript(w http.ResponseWriter) {
 	}
 }
 
+// morphScriptPath serves the vendored Idiomorph DOM-morphing library (#106,
+// ADR-0005), a sibling of the runtime script under /liquid/. The shell loads it
+// first (both deferred, so document order), so applyPatch can morph a patch into
+// the live subtree in place rather than replacing it.
+const morphScriptPath = "/liquid/idiomorph.js"
+
+//go:embed idiomorph.min.js
+var morphScript []byte
+
+// serveMorphScript writes the embedded Idiomorph library.
+func (a *App) serveMorphScript(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	if _, err := w.Write(morphScript); err != nil {
+		a.logger.Error("writing morph script", "error", err)
+	}
+}
+
 // sessionCookieName is the browser-session cookie carrying the opaque session
 // ID that hydro tokens nest under (D15).
 const sessionCookieName = "liquid_session"

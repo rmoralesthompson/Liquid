@@ -27,7 +27,7 @@ The following are deliberately **not** in v0.1 (D4, and the Out-of-Scope list of
 - **Forms / validation framework** — `(submit)` + CSRF work, but there is no form-model, binding, or validation layer.
 - **i18n / translation** (`*goTranslate`) — no internationalization directive or message catalog.
 - **Auth / session persistence** — no authentication, authorization, or login flow; no external/durable session store (see single-node above). There is no auth/privilege-escalation flow to rotate CSRF tokens against yet (D15).
-- **DOM morphing / diffing** — a hydro event re-renders the whole component subtree at its `[hydroId]` boundary and swaps `innerHTML`; there is no morphdom-style DOM merging (D14, D21). Full DOM reconciliation is the v0.2+ answer.
+- **DOM morphing / diffing** — a hydro event re-renders the whole component subtree at its `[hydroId]` boundary; the client **morphs** that re-render into the live DOM in place (Idiomorph, [ADR-0005](adr/0005-dom-morphing.md)), preserving element identity, scroll, focus, media, and CSS-transition state, and reordering keyed lists (by `id`) rather than rebuilding them (D14, D21). A patch still does not update attributes on the `[hydroId]` element itself.
 - **`(input)` / `(change)` events** — v0.1 handles `(click)` and `(submit)`; keystroke- and change-level bindings are not wired.
 - **Interceptor chains** — plain `net/http` middleware (`http.Handler`) suffices for v0.1; there is no framework interceptor pipeline.
 - **Other deferred items:** scoped per-component assets, blueprint catalog, attribute-directive registry, hierarchical DI, URL/history patching, and state-preserving hot reload (`liquid dev` does a full refresh on rebuild, D16).
