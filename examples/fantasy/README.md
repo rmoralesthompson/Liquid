@@ -37,7 +37,7 @@ needed after editing a `.lsx` template or a component struct.
 | League standings | `ui/standings.{go,lsx}` | `*goFor` ladder that re-sorts server-side as points-for tick up; a `(click)` **Full / Top 6** toggle and an `(input)` **search box** that filters by team or manager |
 | Around the league | `ui/around.{go,lsx}` | the week's other matchups, live scores; **click a game to feature it** — the row expands to a win-probability bar (the `(click)` carries the game's index as a typed payload) |
 | Gameday ticker | `ui/ticker.{go,lsx}` | a rolling window of fictional news/stat items, pinned to the bottom, **scrolling right-to-left** (a duplicated CSS-animated track), pushed as they "happen" |
-| Starting lineup (page 2) | `ui/lineup.{go,lsx}` + `ui/roster.{go,lsx}` | routed shell composing the interactive roster; `*goFor` rows with server-drawn SVG headshots |
+| Starting lineup (page 2) | `ui/lineup.{go,lsx}` + `ui/roster.{go,lsx}` | a full lineup view on the same broadcast theme: a top nav that links **back to the dashboard**, a matchup hero, a live projected total, and `*goFor` rows with position-coloured badges, server-drawn SVG headshots, and per-player projection bars |
 | Models | `ui/model.go`, `ui/player.go` | display formatting — all numbers preformatted on the server; templates do no arithmetic |
 
 ### The data flow

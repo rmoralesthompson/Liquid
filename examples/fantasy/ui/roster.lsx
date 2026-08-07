@@ -1,15 +1,18 @@
 <section [hydroId] id="roster" class="panel" aria-live="polite" aria-label="Live starting lineup">
   <div class="panel__head">
     <div class="panel__title-wrap">
-      <span class="panel__kicker">Starters</span>
-      <h2 class="panel__title">This Week's Lineup</h2>
+      <span class="panel__kicker"><span class="live-dot"></span> Live &middot; SSE</span>
+      <h2 class="panel__title">This Week's Starters</h2>
     </div>
-    <span class="live-pill" aria-hidden="true"><span class="live-dot"></span>LIVE</span>
+    <div class="roster__total">
+      <span id="lineup-total" class="roster__total-value">{{ Total }}</span>
+      <span class="roster__total-label">PROJ TOTAL</span>
+    </div>
   </div>
 
   <ol class="roster" role="list">
     <li class="player" role="listitem" *goFor="let p of Players">
-      <span class="player__pos">{{ $p.Pos }}</span>
+      <span class="player__pos player__pos--{{ $p.PosClass }}">{{ $p.Pos }}</span>
       <span class="avatar avatar--{{ $p.TeamClass }}">
         <svg viewBox="0 0 48 48" aria-hidden="true">
           <g clip-path="url(#avatarClip)">
@@ -22,7 +25,13 @@
       </span>
       <span class="player__id">
         <span class="player__name">{{ $p.Name }}</span>
-        <span class="player__meta">{{ $p.Team }} <span class="player__dot">·</span> {{ $p.Pos }} <span class="player__dot">·</span> {{ $p.Number }}</span>
+        <span class="player__meta">{{ $p.Team }} <span class="dot">&middot;</span> {{ $p.Pos }} <span class="dot">&middot;</span> {{ $p.Number }}</span>
+      </span>
+      <span class="player__bar">
+        <svg viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true">
+          <rect class="player__bar-track" x="0" y="0" width="100" height="6" rx="3"></rect>
+          <rect class="player__bar-fill" x="0" y="0" width="{{ $p.Bar }}" height="6" rx="3"></rect>
+        </svg>
       </span>
       <span class="player__proj">
         <span class="player__pts">{{ $p.Points }}</span>
@@ -30,9 +39,4 @@
       </span>
     </li>
   </ol>
-
-  <div class="roster__foot">
-    <span class="roster__foot-label">Projected Total</span>
-    <span id="lineup-total" class="roster__foot-value">{{ Total }}</span>
-  </div>
 </section>

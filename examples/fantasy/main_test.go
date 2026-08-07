@@ -134,7 +134,7 @@ func TestRosterRendersSeededLineup(t *testing.T) {
 		t.Fatalf("GET /team = %d, want 200\n--- body ---\n%s", page.Code, page.Body)
 	}
 	seeded := playersOf(seedLineup())
-	if rows := strings.Count(page.Body, `class="player__pos"`); rows != len(seeded) {
+	if rows := strings.Count(page.Body, `class="player__pos `); rows != len(seeded) {
 		t.Errorf("rendered %d player rows, want %d", rows, len(seeded))
 	}
 	if !strings.Contains(page.Body, seeded[0].Name) {
@@ -347,5 +347,22 @@ func TestStandingsSearchFilters(t *testing.T) {
 	}
 	if rows := strings.Count(patch.Envelope.Patch, `role="row"`); rows != 1+1 {
 		t.Errorf("filtered rows = %d, want 2 (one match + header)", rows)
+	}
+}
+
+func TestLineupPageNavigatesBackToDashboard(t *testing.T) {
+	h, _ := newHarness(t)
+	page := h.Get("/team")
+	if page.Code != http.StatusOK {
+		t.Fatalf("GET /team = %d, want 200", page.Code)
+	}
+	// The lineup page offers a link back to the dashboard.
+	if !strings.Contains(page.Body, `href="/"`) {
+		t.Error("lineup page has no link back to the dashboard")
+	}
+	// ...and the dashboard links out to the lineup.
+	dash := h.Get("/")
+	if !strings.Contains(dash.Body, `href="/team"`) {
+		t.Error("dashboard has no link to the full lineup")
 	}
 }
