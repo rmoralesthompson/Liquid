@@ -10,7 +10,7 @@ Interactive component instances live in an **in-memory** registry, keyed by an o
 
 **Concrete implication:** Liquid v0.1 runs as a **single node**. You cannot horizontally scale it across multiple instances behind a plain round-robin load balancer, because a live session's state exists only in the process that created it — a request routed to a different instance will not find that session and its interactivity breaks. If you must run more than one instance, you need **sticky sessions** (session affinity, so each browser session keeps hitting the same node).
 
-The registry entry type (`HydroState`) is designed so a serialization backend — `Snapshot()`/`Restore()` over Redis or similar — can be added later, at which point a "resume anywhere" / multi-node story becomes possible. **That seam exists but is unbuilt.** Redis / external session persistence is explicitly deferred (D4), and the "resume anywhere" capability is not claimed until it ships. Whether multi-node becomes a v1.0 prerequisite is a separate open maintainer decision, not a promise here.
+The registry entry type (`HydroState`) is designed so a serialization backend — `Snapshot()`/`Restore()` over Redis or similar — can be added later, at which point a "resume anywhere" / multi-node story becomes possible. **That seam exists but is unbuilt.** Redis / external session persistence is explicitly deferred (D4), and the "resume anywhere" capability is not claimed until it ships. Single-node is a deliberate v0.1 choice, not a v1.0 blocker: the Redis-backed backend is on the [v0.2 roadmap](roadmap.md), decided in [ADR-0002](adr/0002-single-node-sessions-v0.1.md).
 
 ## SSE-only transport
 
