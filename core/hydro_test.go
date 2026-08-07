@@ -621,6 +621,9 @@ func TestRuntimeScriptIsServedAsAStaticFile(t *testing.T) {
 	}
 	for _, want := range []string{
 		"data-liquid-action", "/hydro-event", "data-hydro-id",
+		// A click carries the bound element's data-* attributes as its payload,
+		// so it can say which item it was.
+		"bound.dataset",
 		// The submit and CSRF halves of the loop (D12/D15): the script must
 		// key on the compiled submit attribute, serialize the form, and send
 		// the shell's token with every event.

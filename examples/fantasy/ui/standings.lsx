@@ -10,6 +10,10 @@
     </div>
   </div>
 
+  <div class="std-search">
+    <input id="team-search" class="search" type="search" placeholder="Filter teams or managers&hellip;" (input)="Search" autocomplete="off" aria-label="Filter standings" />
+  </div>
+
   <div class="table" role="table" aria-label="League standings table">
     <div class="table__row table__row--head" role="row">
       <span class="col col--rank" role="columnheader">#</span>

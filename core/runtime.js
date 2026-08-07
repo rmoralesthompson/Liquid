@@ -125,7 +125,18 @@
     const root = bound.closest("[data-hydro-id]");
     if (!root) return;
     e.preventDefault();
-    fire(root, bound.dataset.liquidAction, undefined);
+    // Extra data-* attributes on the bound element ride along as the payload,
+    // so a click can say *which* item it was — e.g. data-id="3" arrives as
+    // e.String("id"), or binds into a typed payload field. The framework's own
+    // data-liquid-* and data-hydro-id are excluded. No data-* => undefined,
+    // preserving the bare-click contract.
+    let payload = null;
+    for (const key in bound.dataset) {
+      if (key === "liquidAction" || key === "hydroId") continue;
+      if (!payload) payload = {};
+      payload[key] = bound.dataset[key];
+    }
+    fire(root, bound.dataset.liquidAction, payload || undefined);
   });
 
   // Value events (#104). (input) fires on every keystroke, so it is debounced

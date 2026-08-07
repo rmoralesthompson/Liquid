@@ -23,6 +23,10 @@ type Matchup struct {
 	// Expanded is per-session view state toggled by (click): whether the
 	// top-starters list is open.
 	Expanded bool
+	// pulse flips on every match push so the score gets a fresh flash. It
+	// alternates two class names (below) because a CSS animation only restarts
+	// when its name changes across an Idiomorph patch.
+	pulse bool
 }
 
 func (m *Matchup) Selector() string { return "app-matchup" }
@@ -69,12 +73,22 @@ func (m *Matchup) Starters() []Player { return m.topStarters(4) }
 // ToggleStarters is the (click) action that opens or closes the starters list.
 func (m *Matchup) ToggleStarters() { m.Expanded = !m.Expanded }
 
+// PulseClass alternates two identical flash animations so a score change
+// re-triggers the highlight on each push.
+func (m *Matchup) PulseClass() string {
+	if m.pulse {
+		return "is-bumped-a"
+	}
+	return "is-bumped-b"
+}
+
 // Subscriptions drives the live push on either feed — the head-to-head or your
-// lineup — so scores and top performers both stay live. The render pulls the
-// latest snapshots via the accessors, so both applies are no-ops.
+// lineup — so scores and top performers both stay live. The match apply flips
+// the pulse so a score change flashes; the board apply is a no-op (the render
+// pulls the latest snapshots via the accessors).
 func (m *Matchup) Subscriptions() []liquid.Subscription {
 	return []liquid.Subscription{
-		liquid.Observe(m.Match, func(MatchState) {}),
+		liquid.Observe(m.Match, func(MatchState) { m.pulse = !m.pulse }),
 		liquid.Observe(m.Board, func([]Player) {}),
 	}
 }

@@ -280,3 +280,72 @@ func TestStandingsPlayoffToggle(t *testing.T) {
 		t.Errorf("full view rows after toggling back = %d, want %d", rows, len(clubNames)+1)
 	}
 }
+
+// featuredHome returns the home team of the featured (expanded) around-league
+// game in a rendered fragment — the first team name inside the mini--featured
+// block.
+func featuredHome(html string) string {
+	i := strings.Index(html, "mini mini--featured")
+	if i < 0 {
+		return ""
+	}
+	seg := html[i:]
+	const marker = `mini__team">`
+	j := strings.Index(seg, marker)
+	if j < 0 {
+		return ""
+	}
+	seg = seg[j+len(marker):]
+	k := strings.IndexByte(seg, '<')
+	if k < 0 {
+		return ""
+	}
+	return strings.TrimSpace(seg[:k])
+}
+
+func TestAroundFeaturesGameFromClickPayload(t *testing.T) {
+	h, _ := newHarness(t)
+	page := h.Get("/")
+	clubs := seedLeague()
+
+	// On load exactly one game is featured — the first (clubs[2] vs clubs[3]).
+	if n := strings.Count(page.Body, "mini mini--featured"); n != 1 {
+		t.Fatalf("featured games on load = %d, want 1", n)
+	}
+	if got, want := featuredHome(page.Body), clubs[2].name; got != want {
+		t.Errorf("default featured home = %q, want %q", got, want)
+	}
+
+	// Click the last game — the (click) carries its data-idx as a typed
+	// payload, so that game (clubs[8] vs clubs[9]) becomes featured.
+	patch := page.Fire("Feature", liquidtest.From("#around"), liquidtest.Field("idx", "3"))
+	if patch.Code != http.StatusOK {
+		t.Fatalf("Fire Feature = %d", patch.Code)
+	}
+	if n := strings.Count(patch.Envelope.Patch, "mini mini--featured"); n != 1 {
+		t.Errorf("featured games after click = %d, want 1", n)
+	}
+	if got, want := featuredHome(patch.Envelope.Patch), clubs[8].name; got != want {
+		t.Errorf("featured home after clicking idx 3 = %q, want %q", got, want)
+	}
+}
+
+func TestStandingsSearchFilters(t *testing.T) {
+	h, _ := newHarness(t)
+	page := h.Get("/")
+
+	// Type "neon": the (input) filters the ladder to matching teams only.
+	patch := page.Fire("Search", liquidtest.From("#standings"), liquidtest.Field("value", "neon"))
+	if patch.Code != http.StatusOK {
+		t.Fatalf("Fire Search = %d", patch.Code)
+	}
+	if !strings.Contains(patch.Envelope.Patch, "Neon Comets") {
+		t.Error("filtered standings dropped the matching team")
+	}
+	if strings.Contains(patch.Envelope.Patch, "Thunder Yaks") {
+		t.Error("filtered standings still shows a non-matching team")
+	}
+	if rows := strings.Count(patch.Envelope.Patch, `role="row"`); rows != 1+1 {
+		t.Errorf("filtered rows = %d, want 2 (one match + header)", rows)
+	}
+}

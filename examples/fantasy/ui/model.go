@@ -1,6 +1,9 @@
 package ui
 
-import "fmt"
+import (
+	"fmt"
+	"math"
+)
 
 // This file holds the display models for the league dashboard (the fantasy
 // example's first page): the weekly head-to-head, the league standings, and the
@@ -86,26 +89,34 @@ func MakeStanding(rank int, name, manager, record string, pointsFor float64, row
 }
 
 // MiniGame is one other head-to-head in the league this week (the "around the
-// league" rail), with the current leader flagged for highlighting.
+// league" rail), with the current leader flagged and a home-team win
+// probability the featured view reveals.
 type MiniGame struct {
+	Idx                  string // stable index — the data-idx a click carries to feature it
 	Home, Away           string
 	HomeScore, AwayScore string
 	HomeClass, AwayClass string // "mini__side--lead" on the side currently ahead
+	WinPct               string // the home team's win probability, 0–100, for the featured bar
 }
 
-// MakeMiniGame formats a raw other-matchup and marks the leading side.
-func MakeMiniGame(home, away string, homeScore, awayScore float64) MiniGame {
+// MakeMiniGame formats a raw other-matchup, marks the leading side, and derives
+// a win probability from the score margin.
+func MakeMiniGame(idx int, home, away string, homeScore, awayScore float64) MiniGame {
 	hc, ac := "", "mini__side--lead"
 	if homeScore >= awayScore {
 		hc, ac = "mini__side--lead", ""
 	}
+	pct := 50 + (homeScore-awayScore)*1.6
+	pct = math.Max(4, math.Min(96, pct))
 	return MiniGame{
+		Idx:       fmt.Sprintf("%d", idx),
 		Home:      home,
 		Away:      away,
 		HomeScore: fmt.Sprintf("%.1f", homeScore),
 		AwayScore: fmt.Sprintf("%.1f", awayScore),
 		HomeClass: hc,
 		AwayClass: ac,
+		WinPct:    fmt.Sprintf("%d", int(math.Round(pct))),
 	}
 }
 
