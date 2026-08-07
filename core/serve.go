@@ -139,5 +139,6 @@ func (a *App) serve(ctx context.Context, ln net.Listener, cfg ServeConfig) error
 // registered as an http.Server OnShutdown hook so a graceful shutdown does not
 // hang on idle SSE connections.
 func (a *App) drainSessions() {
+	a.draining.Store(true)
 	a.hydro.drainAll()
 }

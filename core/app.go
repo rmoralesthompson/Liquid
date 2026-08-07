@@ -14,6 +14,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -23,6 +24,7 @@ import (
 // state across requests.
 type App struct {
 	logger     *slog.Logger
+	metrics    Metrics // observability sink (#102); no-op unless WithMetrics
 	routes     []*route
 	components map[string]*registration // selector → render machinery; child selectors resolve here (D14)
 	services   []reflect.Value          // Provide'd singletons, in registration order
@@ -34,7 +36,8 @@ type App struct {
 	rand       io.Reader                // opaque-token CSPRNG source (D15); crypto/rand.Reader in every build, replaceable only in-package for deterministic render (D28)
 	dev        devState                 // dev-build broadcaster (D16); an empty struct in production builds
 
-	insecureWarn sync.Once // fires the plain-HTTP-non-localhost Secure-cookie warning at most once (#47)
+	draining     atomic.Bool // set once graceful shutdown begins; readiness reports 503 while true (#102)
+	insecureWarn sync.Once   // fires the plain-HTTP-non-localhost Secure-cookie warning at most once (#47)
 }
 
 // registration is one component type's render machinery, resolved once when
@@ -167,10 +170,11 @@ func WithLimits(l Limits) Option {
 // New creates an App, applying any options.
 func New(opts ...Option) *App {
 	a := &App{
-		logger: slog.Default(),
-		limits: Limits{}.withDefaults(),
-		now:    time.Now,
-		rand:   rand.Reader,
+		logger:  slog.Default(),
+		metrics: noopMetrics{},
+		limits:  Limits{}.withDefaults(),
+		now:     time.Now,
+		rand:    rand.Reader,
 	}
 	for _, opt := range opts {
 		opt(a)
@@ -383,11 +387,17 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	if r.URL.Path == hydroEventPath {
-		a.serveHydroEvent(w, r)
+		start := a.now()
+		sr := &statusRecorder{ResponseWriter: w}
+		a.serveHydroEvent(sr, r)
+		a.metrics.EventDispatched(sr.code(), a.now().Sub(start))
 		return
 	}
 	if r.URL.Path == hydroSSEPath {
 		a.serveHydroSSE(w, r)
+		return
+	}
+	if a.serveHealthEndpoints(w, r) {
 		return
 	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -416,7 +426,10 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !a.runGuards(w, r, rt, ctx) {
 		return
 	}
-	a.renderRoute(w, r, rt, params, ctx)
+	start := a.now()
+	sr := &statusRecorder{ResponseWriter: w}
+	a.renderRoute(sr, r, rt, params, ctx)
+	a.metrics.PageRendered(sr.code(), a.now().Sub(start))
 }
 
 // serveScript handles the framework's fixed script paths: the runtime script
