@@ -1,0 +1,44 @@
+<section [hydroId] id="matchup" class="panel matchup" aria-live="polite" aria-label="This week's matchup">
+  <div class="panel__head">
+    <div class="panel__title-wrap">
+      <span class="panel__kicker">Week 5 · Head to Head</span>
+      <h2 class="panel__title">Your Matchup</h2>
+    </div>
+    <span class="live-pill" aria-hidden="true"><span class="live-dot"></span>LIVE</span>
+  </div>
+
+  <div class="score">
+    <div class="score__side score__side--you">
+      <div class="score__team">{{ You.Team }}</div>
+      <div class="score__mgr">{{ You.Manager }} <span class="dot">·</span> {{ You.Record }}</div>
+      <div class="score__pts">{{ You.Score }}</div>
+      <div class="score__proj">proj {{ You.Proj }}</div>
+      <div class="score__top">{{ You.Top }}</div>
+    </div>
+
+    <div class="score__mid">
+      <span class="score__clock">{{ Clock }}</span>
+      <span class="score__vs">VS</span>
+      <span class="score__tag">Win&nbsp;probability</span>
+    </div>
+
+    <div class="score__side score__side--opp">
+      <div class="score__team">{{ Opp.Team }}</div>
+      <div class="score__mgr">{{ Opp.Manager }} <span class="dot">·</span> {{ Opp.Record }}</div>
+      <div class="score__pts">{{ Opp.Score }}</div>
+      <div class="score__proj">proj {{ Opp.Proj }}</div>
+      <div class="score__top">{{ Opp.Top }}</div>
+    </div>
+  </div>
+
+  <div class="winbar">
+    <svg class="winbar__svg" viewBox="0 0 100 10" preserveAspectRatio="none" role="img" aria-label="Your win probability">
+      <rect class="winbar__track" x="0" y="0" width="100" height="10" rx="5"></rect>
+      <rect class="winbar__fill" x="0" y="0" width="{{ WinPct }}" height="10" rx="5"></rect>
+    </svg>
+    <div class="winbar__labels">
+      <span class="winbar__you">{{ You.Team }} <strong>{{ WinPct }}%</strong></span>
+      <span class="winbar__opp">{{ Opp.Team }}</span>
+    </div>
+  </div>
+</section>

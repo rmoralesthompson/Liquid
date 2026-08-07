@@ -1,0 +1,23 @@
+<section [hydroId] id="around" class="panel" aria-live="polite" aria-label="Around the league">
+  <div class="panel__head">
+    <div class="panel__title-wrap">
+      <span class="panel__kicker">Week 5 · Live scores</span>
+      <h2 class="panel__title">Around the League</h2>
+    </div>
+    <span class="live-pill" aria-hidden="true"><span class="live-dot"></span>LIVE</span>
+  </div>
+
+  <div class="mini-list" role="list">
+    <div class="mini" role="listitem" *goFor="let g of Games">
+      <span class="mini__side {{ $g.HomeClass }}">
+        <span class="mini__team">{{ $g.Home }}</span>
+        <span class="mini__pts">{{ $g.HomeScore }}</span>
+      </span>
+      <span class="mini__vs">vs</span>
+      <span class="mini__side mini__side--r {{ $g.AwayClass }}">
+        <span class="mini__pts">{{ $g.AwayScore }}</span>
+        <span class="mini__team">{{ $g.Away }}</span>
+      </span>
+    </div>
+  </div>
+</section>
