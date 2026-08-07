@@ -22,7 +22,7 @@
       <span class="col col--pf" role="columnheader">PF</span>
     </div>
 
-    <div class="table__row {{ $t.RowClass }}" role="row" *goFor="let t of Teams">
+    <a class="table__row table__row--link {{ $t.RowClass }}" role="row" href="/team/{{ $t.Slug }}" *goFor="let t of Teams">
       <span class="col col--rank" role="cell">
         <span class="table__dot table__dot--{{ $t.LiveClass }}" aria-hidden="true"></span>{{ $t.Rank }}
       </span>
@@ -32,6 +32,7 @@
       </span>
       <span class="col col--rec" role="cell">{{ $t.Record }}</span>
       <span class="col col--pf" role="cell">{{ $t.PointsFor }}</span>
-    </div>
+      <span class="col col--go" role="cell" aria-hidden="true">&rsaquo;</span>
+    </a>
   </div>
 </section>

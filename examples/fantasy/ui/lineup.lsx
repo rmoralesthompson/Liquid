@@ -79,6 +79,12 @@
     .footer a { color: var(--you); text-decoration: none; font-weight: 700; }
     .footer a:hover { text-decoration: underline; }
 
+    /* team-not-found */
+    .missing { text-align: center; padding: 2.4rem 1.15rem; }
+    .missing .hero__title { margin-bottom: .5rem; }
+    .missing__link { color: var(--you); text-decoration: none; font-weight: 700; }
+    .missing__link:hover { text-decoration: underline; }
+
     @media (max-width: 560px) { .player { grid-template-columns: 2.3rem 34px 1fr auto; } .player__bar { display: none; } }
     @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
   </style>
@@ -93,16 +99,67 @@
   <nav class="topbar" aria-label="Primary">
     <a class="topbar__back" href="/"><span class="chev" aria-hidden="true">&larr;</span> Dashboard</a>
     <span class="topbar__brand"><span class="topbar__logo" aria-hidden="true">G</span>Gridiron <em>Guild</em></span>
-    <span class="topbar__me">{{ Manager }}</span>
+    <span class="topbar__me">{{ Name }}</span>
   </nav>
 
-  <header class="hero">
-    <span class="hero__kicker">{{ Week }} &middot; Starters</span>
-    <h1 class="hero__title">My Lineup</h1>
-    <p class="hero__sub"><strong>{{ Manager }}</strong> <span class="dot">&middot;</span> this week vs <span class="opp">{{ Opponent }}</span></p>
-  </header>
+  <div *goIf="Missing" class="panel missing">
+    <h1 class="hero__title">Team not found</h1>
+    <p class="hero__sub">That team isn&rsquo;t in the league. <a class="missing__link" href="/">Back to the dashboard &rarr;</a></p>
+  </div>
 
-  <app-roster></app-roster>
+  <div *goIf="Found">
+    <header class="hero">
+      <span class="hero__kicker">{{ Week }} &middot; Starters</span>
+      <h1 class="hero__title">{{ Title }}</h1>
+      <p class="hero__sub"><strong>{{ Manager }}</strong> <span class="dot">&middot;</span> {{ Record }} <span class="dot">&middot;</span> this week vs <span class="opp">{{ Opponent }}</span></p>
+    </header>
+
+    <!-- your team: the live roster, patched over SSE -->
+    <app-roster *goIf="IsYou"></app-roster>
+
+    <!-- any other team: a static, seeded lineup -->
+    <section *goIf="NotYou" class="panel" aria-label="Full lineup">
+      <div class="panel__head">
+        <div class="panel__title-wrap">
+          <span class="panel__kicker">Projected &middot; {{ Week }}</span>
+          <h2 class="panel__title">Starting Lineup</h2>
+        </div>
+        <div class="roster__total">
+          <span class="roster__total-value">{{ Total }}</span>
+          <span class="roster__total-label">PROJ TOTAL</span>
+        </div>
+      </div>
+      <ol class="roster" role="list">
+        <li class="player" role="listitem" *goFor="let p of Players">
+          <span class="player__pos player__pos--{{ $p.PosClass }}">{{ $p.Pos }}</span>
+          <span class="avatar avatar--{{ $p.TeamClass }}">
+            <svg viewBox="0 0 48 48" aria-hidden="true">
+              <g clip-path="url(#avatarClip)">
+                <rect width="48" height="48" fill="currentColor"></rect>
+                <circle cx="24" cy="19" r="8.5" fill="#ffffff" opacity="0.92"></circle>
+                <path d="M8 45c0-8.6 7.2-14 16-14s16 5.4 16 14z" fill="#ffffff" opacity="0.92"></path>
+              </g>
+              <circle cx="24" cy="24" r="22.5" fill="none" stroke="#35f58c" stroke-width="1.5" opacity="0.85"></circle>
+            </svg>
+          </span>
+          <span class="player__id">
+            <span class="player__name">{{ $p.Name }}</span>
+            <span class="player__meta">{{ $p.Team }} <span class="dot">&middot;</span> {{ $p.Pos }} <span class="dot">&middot;</span> {{ $p.Number }}</span>
+          </span>
+          <span class="player__bar">
+            <svg viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true">
+              <rect class="player__bar-track" x="0" y="0" width="100" height="6" rx="3"></rect>
+              <rect class="player__bar-fill" x="0" y="0" width="{{ $p.Bar }}" height="6" rx="3"></rect>
+            </svg>
+          </span>
+          <span class="player__proj">
+            <span class="player__pts">{{ $p.Points }}</span>
+            <span class="player__unit">PROJ</span>
+          </span>
+        </li>
+      </ol>
+    </section>
+  </div>
 
   <footer class="footer">
     Projections stream live over SSE &mdash; no client charting or JS framework.
