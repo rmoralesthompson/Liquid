@@ -1,0 +1,10 @@
+<section [hydroId] id="ticker" class="ticker-bar" aria-live="polite" aria-label="Live news and stats">
+  <span class="ticker-bar__brand" aria-hidden="true"><span class="live-dot"></span>GAMEDAY</span>
+  <div class="ticker-bar__rail" role="list">
+    <span class="tick tick--{{ $i.KindClass }}" role="listitem" *goFor="let i of Items">
+      <span class="tick__kind">{{ $i.Kind }}</span>
+      <span class="tick__team">{{ $i.Team }}</span>
+      <span class="tick__text">{{ $i.Text }}</span>
+    </span>
+  </div>
+</section>
