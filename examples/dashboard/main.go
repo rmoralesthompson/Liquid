@@ -20,8 +20,9 @@ import (
 	"log/slog"
 	"math"
 	"math/rand/v2"
-	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	liquid "github.com/rmoralesthompson/liquid/core"
@@ -193,16 +194,19 @@ func main() {
 		os.Exit(1)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	go driveMetric(ctx, requests)
 	go driveMarket(ctx, market, assets)
 	go driveSeries(ctx, series)
 
 	const addr = ":8080"
 	logger.Info("dashboard listening", "addr", "http://localhost"+addr)
-	if err := http.ListenAndServe(addr, app); err != nil {
+	// Serve applies production timeouts and drains live SSE streams on
+	// SIGINT/SIGTERM, so a deploy does not sever sessions abruptly.
+	if err := app.Serve(ctx, liquid.ServeConfig{Addr: addr}); err != nil {
 		logger.Error("serving", "err", err)
 		os.Exit(1)
 	}
+	logger.Info("dashboard stopped")
 }
