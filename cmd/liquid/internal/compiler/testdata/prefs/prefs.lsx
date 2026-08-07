@@ -1,0 +1,4 @@
+<div [hydroId]>
+  <span id="current">{{ Current }}</span>
+  <button (click)="SetPriority">set</button>
+</div>
