@@ -7,6 +7,14 @@ package compiler
 // type v0.1 exposes to the compiler — so guard presence and const-set
 // enumeration are computed together here, once, over the go/types view (the
 // one-grammar guarantee: seam, manifest and vet cannot disagree).
+//
+// Consequence, intended for v0.1 (#85, ADR-0003): a closed-domain enum field is
+// enumerated — and therefore enforced at the seam — only when its action
+// declares a guard, because the guard's parameter is the only place the payload
+// struct is named to the compiler. An unguarded action's closed domain is
+// invisible here and draws the LSX018 unguarded-action warning, not seam
+// enforcement. Closing that gap needs a way to name the payload type without a
+// guard (typed-payload handlers), deferred with the rest of that feature.
 
 import (
 	"context"
@@ -266,7 +274,7 @@ func unguardedActionDiags(facts *Facts, structName string, sa *SourceAnalysis) [
 			Code:     CodeUnguardedAction,
 			Message: fmt.Sprintf("action %s takes a client payload but declares no guard, so nothing constrains its payload values at the dispatch seam (D30)",
 				name),
-			Suggestion: fmt.Sprintf("add func (c *%s) %sGuard(p <Payload>) bool to refuse an out-of-contract payload before the handler runs",
+			Suggestion: fmt.Sprintf("add func (c *%s) %sGuard(p <Payload>) bool to refuse an out-of-contract payload before the handler runs; a closed-domain (enum) payload field is enforced at the seam only when the action declares this guard (D30, ADR-0003)",
 				structName, name),
 		})
 	}

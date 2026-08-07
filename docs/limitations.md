@@ -34,6 +34,25 @@ The following are deliberately **not** in v0.1 (D4, and the Out-of-Scope list of
 
 Also, per D9, **there are no performance claims** in v0.1 — no "faster than X", no superlatives. There is now a measured, reproducible [benchmark baseline](benchmarks.md) (informational, single-machine, not a guarantee and not a comparison), but no comparative or superlative performance claim is made anywhere.
 
+## Payload contracts: closed domains need a guard
+
+The D30 value axis lets a payload field typed as a Go const-set (an enum) be a
+**closed domain** the dispatch seam enforces — an out-of-set value is refused
+before any handler runs. In v0.1 this enforcement is **coupled to declaring a
+boundary guard**: because a handler takes the untyped `liquid.Event`, the only
+place a payload type is named to the compiler is a
+`func (c *T) <Action>Guard(p <Payload>) bool` method's parameter. So a
+closed-domain field on an **unguarded** action is invisible to the compiler,
+never enumerated, and **not enforced** — writing the enum field is not, by
+itself, sufficient.
+
+**Concrete implication:** to get closed-domain enforcement, declare a guard for
+the action (even a `return true` guard that adds no extra check). An unguarded
+payload action instead earns the `LSX018` build warning, whose suggestion names
+this coupling. This is intended v0.1 behavior, not a bug — see
+[ADR-0003](adr/0003-closed-domain-guard-coupling.md) (D30). It will be revisited
+when typed-payload handlers make the payload type discoverable without a guard.
+
 ## API stability: `v0.x`, no backward-compat promise
 
 Liquid follows semver, and while it is in the `v0.x` range it makes **no backward-compatibility promises**. APIs, template directives, the JSON manifest schema, and wire formats may change between minor versions without a compatibility shim. (D24; the `liquid manifest --json` schema carries a version field and explicitly makes no backward-compat promise while `v0.x` — D26.)

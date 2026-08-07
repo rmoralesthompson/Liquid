@@ -53,9 +53,55 @@ func TestVetWarnsUnguardedPayloadAction(t *testing.T) {
 		Severity:   compiler.SeverityWarning,
 		Code:       "LSX018",
 		Message:    "action Rename takes a client payload but declares no guard, so nothing constrains its payload values at the dispatch seam (D30)",
-		Suggestion: "add func (c *Renamer) RenameGuard(p <Payload>) bool to refuse an out-of-contract payload before the handler runs",
+		Suggestion: "add func (c *Renamer) RenameGuard(p <Payload>) bool to refuse an out-of-contract payload before the handler runs; a closed-domain (enum) payload field is enforced at the seam only when the action declares this guard (D30, ADR-0003)",
 	}}
 	if !reflect.DeepEqual(diags, want) {
+		t.Errorf("diagnostics = %+v, want %+v", diags, want)
+	}
+}
+
+// TestUnguardedClosedDomainIsNotEnforced pins the documented v0.1 gap #85 /
+// ADR-0003: a closed-domain enum field on an action that declares no guard is
+// invisible to the contract compiler (the payload struct is named to go/types
+// only through a guard's parameter), so it is neither enumerated into
+// PayloadDomains nor enforced at the seam — the author gets the LSX018
+// unguarded-action warning instead. If typed-payload handlers later make the
+// payload discoverable without a guard, this expectation should flip.
+func TestUnguardedClosedDomainIsNotEnforced(t *testing.T) {
+	dir := copyFixture(t, "prefs")
+
+	// Build: prefs declares Level (a closed const-set) and a SetPriorityPayload,
+	// but SetPriority has no guard, so nothing associates that payload with the
+	// action. No PayloadDomains is generated, and "low"/"high" are not enforced.
+	for _, d := range build(t, dir) {
+		if d.Severity == compiler.SeverityError {
+			t.Fatalf("unexpected error diagnostic building prefs: %+v", d)
+		}
+	}
+	if gen, err := os.ReadFile(filepath.Join(dir, "prefs_gen.go")); err == nil {
+		got := string(gen)
+		if strings.Contains(got, "PayloadDomains") {
+			t.Errorf("prefs_gen.go generated PayloadDomains for an unguarded action; the closed domain should be invisible without a guard\n--- generated ---\n%s", got)
+		}
+		for _, leak := range []string{`"low"`, `"high"`, `"level"`} {
+			if strings.Contains(got, leak) {
+				t.Errorf("prefs_gen.go enumerated %s, but an unguarded closed domain must not be enforced\n--- generated ---\n%s", leak, got)
+			}
+		}
+	}
+
+	// Vet: the author's only signal is the generic unguarded-action warning,
+	// whose sharpened suggestion now names the closed-domain coupling.
+	want := []compiler.Diagnostic{{
+		File:       filepath.Join(dir, "prefs.go"),
+		Line:       38,
+		Col:        17,
+		Severity:   compiler.SeverityWarning,
+		Code:       "LSX018",
+		Message:    "action SetPriority takes a client payload but declares no guard, so nothing constrains its payload values at the dispatch seam (D30)",
+		Suggestion: "add func (c *Prefs) SetPriorityGuard(p <Payload>) bool to refuse an out-of-contract payload before the handler runs; a closed-domain (enum) payload field is enforced at the seam only when the action declares this guard (D30, ADR-0003)",
+	}}
+	if diags := vet(t, dir); !reflect.DeepEqual(diags, want) {
 		t.Errorf("diagnostics = %+v, want %+v", diags, want)
 	}
 }
