@@ -37,6 +37,11 @@ const (
 	kindHydroID = "[hydroId]"
 	kindClick   = "(click)"
 	kindSubmit  = "(submit)"
+	// kindInputEvent/kindChangeEvent are the DOM value-event bindings (#104).
+	// Named with an -Event suffix to stay distinct from kindInput ("[input]"),
+	// the unrelated parent→child property binding.
+	kindInputEvent  = "(input)"
+	kindChangeEvent = "(change)"
 )
 
 // cursor walks a byte slice tracking the 1-based line and byte column of the

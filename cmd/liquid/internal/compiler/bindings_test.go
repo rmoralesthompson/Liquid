@@ -289,3 +289,34 @@ func TestHydroIdCompilesToDataHydroIdInterpolation(t *testing.T) {
 		}
 	}
 }
+
+func TestInputAndChangeBindingsCompileToAttributesAndAllowlist(t *testing.T) {
+	dir := copyFixture(t, "field")
+
+	if diags := build(t, dir); len(diags) != 0 {
+		t.Fatalf("unexpected diagnostics: %+v", diags)
+	}
+
+	generated, err := os.ReadFile(filepath.Join(dir, "field_gen.go"))
+	if err != nil {
+		t.Fatalf("expected field_gen.go beside the source: %v", err)
+	}
+	got := string(generated)
+
+	for _, want := range []string{
+		`data-liquid-input=\"Typed\"`,
+		`data-liquid-change=\"Committed\"`,
+		"func (c *Field) Actions() []string",
+		`"Typed"`,
+		`"Committed"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("generated missing %q\n--- generated ---\n%s", want, got)
+		}
+	}
+	for _, gone := range []string{"(input)", "(change)"} {
+		if strings.Contains(got, gone) {
+			t.Errorf("%s binding must not survive into the generated template\n--- generated ---\n%s", gone, got)
+		}
+	}
+}
