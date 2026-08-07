@@ -82,9 +82,10 @@ func TestLeagueDashboardRendersLiveCards(t *testing.T) {
 	if rows := strings.Count(page.Body, `role="row"`); rows != len(clubNames)+1 {
 		t.Errorf("standings rendered %d rows, want %d (teams + header)", rows, len(clubNames)+1)
 	}
-	// The ticker renders its seeded window of items.
-	if items := strings.Count(page.Body, `class="tick tick--`); items != tickerWindow {
-		t.Errorf("ticker rendered %d items, want %d", items, tickerWindow)
+	// The ticker renders its seeded window twice — the second copy makes the
+	// right-to-left marquee loop seamlessly.
+	if items := strings.Count(page.Body, `class="tick tick--`); items != tickerWindow*2 {
+		t.Errorf("ticker rendered %d tick copies, want %d (window x2 for the marquee)", items, tickerWindow*2)
 	}
 }
 
@@ -208,5 +209,74 @@ func TestRosterRegionDeclaresAriaLive(t *testing.T) {
 	visit(doc)
 	if !found {
 		t.Fatalf("no #roster region in the page")
+	}
+}
+
+// --- clickable interactions -------------------------------------------------
+
+// topScorer returns the highest-projected player — what the matchup surfaces as
+// your top performer, wired to the live roster.
+func topScorer(players []ui.Player) ui.Player {
+	best := players[0]
+	for _, p := range players[1:] {
+		if parseScore(p.Points) > parseScore(best.Points) {
+			best = p
+		}
+	}
+	return best
+}
+
+func parseScore(s string) float64 { v, _ := strconv.ParseFloat(s, 64); return v }
+
+func TestMatchupTopStarterIsWiredAndTogglable(t *testing.T) {
+	h, _ := newHarness(t)
+	page := h.Get("/")
+
+	// The headline top performer is your live roster's highest scorer.
+	top := topScorer(playersOf(seedLineup()))
+	if !strings.Contains(page.Body, top.Name) {
+		t.Errorf("matchup does not surface your roster's top scorer %q", top.Name)
+	}
+	// Collapsed to start: no expanded starters list.
+	if strings.Contains(page.Body, `class="starters"`) {
+		t.Error("starters list shown before the toggle was clicked")
+	}
+
+	// Click the toggle: the (click) action reveals the starters list, still
+	// drawn from the live lineup.
+	patch := page.Fire("ToggleStarters", liquidtest.From("#matchup"))
+	if patch.Code != http.StatusOK {
+		t.Fatalf("Fire ToggleStarters = %d", patch.Code)
+	}
+	if !strings.Contains(patch.Envelope.Patch, `class="starters"`) {
+		t.Errorf("toggle did not reveal the starters list:\n%s", patch.Envelope.Patch)
+	}
+	if !strings.Contains(patch.Envelope.Patch, top.Name) {
+		t.Errorf("expanded starters missing your top scorer %q", top.Name)
+	}
+}
+
+func TestStandingsPlayoffToggle(t *testing.T) {
+	h, _ := newHarness(t)
+	page := h.Get("/")
+
+	// Full table: every league team plus the header row.
+	if rows := strings.Count(page.Body, `role="row"`); rows != len(clubNames)+1 {
+		t.Fatalf("full table rows = %d, want %d", rows, len(clubNames)+1)
+	}
+
+	// Click "Top 6": the (click) action trims to the playoff picture.
+	patch := page.Fire("ShowPlayoff", liquidtest.From("#standings"))
+	if patch.Code != http.StatusOK {
+		t.Fatalf("Fire ShowPlayoff = %d", patch.Code)
+	}
+	if rows := strings.Count(patch.Envelope.Patch, `role="row"`); rows != 6+1 {
+		t.Errorf("playoff view rows = %d, want 7 (top 6 + header)", rows)
+	}
+
+	// Click "Full": back to the whole ladder.
+	patch = page.Fire("ShowFull", liquidtest.From("#standings"))
+	if rows := strings.Count(patch.Envelope.Patch, `role="row"`); rows != len(clubNames)+1 {
+		t.Errorf("full view rows after toggling back = %d, want %d", rows, len(clubNames)+1)
 	}
 }
