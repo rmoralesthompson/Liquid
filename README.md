@@ -1,6 +1,8 @@
-# Liquid
+<p align="center">
+  <img src="docs/banner.svg" alt="Liquid — server-driven UI for Go" width="100%">
+</p>
 
-A Golang front-end framework optimized for agentic delivery.
+<p align="center"><strong>A Golang front-end framework optimized for agentic delivery.</strong></p>
 
 Server-driven UI in Go: an Angular-style component model, LiveView-style interactivity over fetch + SSE, and ahead-of-time template compilation that doubles as a guardrail for AI-generated code — structured build diagnostics feed straight back to the generating agent.
 
