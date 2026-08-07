@@ -9,8 +9,10 @@ import liquid "github.com/rmoralesthompson/liquid/core"
 type Lineup struct {
 	// Week labels the header (e.g. "Week 5").
 	Week string
-	// Manager is the fantasy team's name, shown in the brand bar.
+	// Manager is your fantasy team's name, shown in the header.
 	Manager string
+	// Opponent is this week's opponent, for the matchup breadcrumb.
+	Opponent string
 }
 
 // Selector returns the custom element tag for the component.
@@ -18,5 +20,8 @@ func (l *Lineup) Selector() string { return "app-lineup" }
 
 // Head sets the document title (D22).
 func (l *Lineup) Head() liquid.Head {
-	return liquid.Head{Title: "Gridiron — fantasy lineup"}
+	return liquid.Head{
+		Title: "Gridiron Guild — my lineup",
+		Meta:  []liquid.Meta{{Name: "color-scheme", Content: "dark"}},
+	}
 }

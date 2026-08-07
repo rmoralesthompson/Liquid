@@ -114,8 +114,18 @@ func seedLineup() []starter {
 
 func playersOf(ss []starter) []ui.Player {
 	out := make([]ui.Player, len(ss))
+	top := 0.0
+	for _, s := range ss {
+		if s.points > top {
+			top = s.points
+		}
+	}
 	for i, s := range ss {
-		out[i] = ui.MakePlayer(s.name, s.team, s.pos, s.number, s.points)
+		p := ui.MakePlayer(s.name, s.team, s.pos, s.number, s.points)
+		if top > 0 {
+			p.Bar = fmt.Sprintf("%d", int(s.points/top*100))
+		}
+		out[i] = p
 	}
 	return out
 }
@@ -321,7 +331,7 @@ func newApp(
 	if err := app.Route("/", &ui.League{Name: "The Gridiron Guild", Week: "Week 5", Team: "Thunder Yaks", Record: "3-1", Rank: "3"}); err != nil {
 		return nil, fmt.Errorf("routing /: %w", err)
 	}
-	if err := app.Route("/team", &ui.Lineup{Week: "Week 5", Manager: "Thunder Yaks"}); err != nil {
+	if err := app.Route("/team", &ui.Lineup{Week: "Week 5", Manager: "Thunder Yaks", Opponent: "Neon Comets"}); err != nil {
 		return nil, fmt.Errorf("routing /team: %w", err)
 	}
 	return app, nil

@@ -18,11 +18,15 @@ type Player struct {
 	Pos       string
 	Number    string
 	Points    string
-	TeamClass string
+	TeamClass string // lowercased team code — keys the headshot colour
+	PosClass  string // lowercased position — keys the position-badge colour
+	Bar       string // 0–100, this player's points as a share of the lineup's top scorer
 }
 
 // MakePlayer formats a raw projection into a display Player. The feed (in
-// package main) owns the numbers; the ui package owns how they render.
+// package main) owns the numbers; the ui package owns how they render. Bar is
+// filled in by the feed once the whole lineup is known (it is relative to the
+// top scorer).
 func MakePlayer(name, team, pos string, number int, points float64) Player {
 	return Player{
 		Name:      name,
@@ -31,5 +35,6 @@ func MakePlayer(name, team, pos string, number int, points float64) Player {
 		Number:    fmt.Sprintf("#%d", number),
 		Points:    fmt.Sprintf("%.1f", points),
 		TeamClass: strings.ToLower(team),
+		PosClass:  strings.ToLower(pos),
 	}
 }
