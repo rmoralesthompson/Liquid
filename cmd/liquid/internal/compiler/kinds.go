@@ -60,6 +60,20 @@ var directiveKinds = []directiveKind{
 		rewrite:   rewriteSubmit,
 	},
 	{
+		canonical: kindInputEvent,
+		lowered:   kindInputEvent,
+		action:    true,
+		ref:       actionRef,
+		rewrite:   rewriteInputEvent,
+	},
+	{
+		canonical: kindChangeEvent,
+		lowered:   kindChangeEvent,
+		action:    true,
+		ref:       actionRef,
+		rewrite:   rewriteChangeEvent,
+	},
+	{
 		canonical: kindHydroID,
 		lowered:   "[hydroid]",
 		ref:       hydroRootRef,
@@ -243,6 +257,24 @@ func rewriteClick(n *html.Node, i int, actions *[]string) error {
 // the compiled allowlist.
 func rewriteSubmit(n *html.Node, i int, actions *[]string) error {
 	n.Attr[i].Key = "data-liquid-submit"
+	*actions = append(*actions, n.Attr[i].Val)
+	return nil
+}
+
+// rewriteInputEvent turns (input)="Method" into data-liquid-input="Method" —
+// the hook the runtime script's (debounced) input listener keys on — and adds
+// Method to the compiled allowlist.
+func rewriteInputEvent(n *html.Node, i int, actions *[]string) error {
+	n.Attr[i].Key = "data-liquid-input"
+	*actions = append(*actions, n.Attr[i].Val)
+	return nil
+}
+
+// rewriteChangeEvent turns (change)="Method" into data-liquid-change="Method" —
+// the hook the runtime script's change listener keys on — and adds Method to
+// the compiled allowlist.
+func rewriteChangeEvent(n *html.Node, i int, actions *[]string) error {
+	n.Attr[i].Key = "data-liquid-change"
 	*actions = append(*actions, n.Attr[i].Val)
 	return nil
 }

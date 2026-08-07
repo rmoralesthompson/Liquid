@@ -1,0 +1,7 @@
+<div [hydroId] class="field">
+  <input id="draft" (input)="Typed">
+  <select id="pick" (change)="Committed">
+    <option>a</option>
+    <option>b</option>
+  </select>
+</div>

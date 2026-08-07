@@ -125,6 +125,41 @@
     fire(root, bound.dataset.liquidAction, undefined);
   });
 
+  // Value events (#104). (input) fires on every keystroke, so it is debounced
+  // to coalesce a typing burst into one dispatch; (change) fires on commit
+  // (blur / select), so it dispatches immediately. Both send the element's
+  // current value as {value}, and neither calls preventDefault — that would
+  // break typing and native control behavior. Handlers ride the same
+  // allowlist + CSRF + payload-contract path as (click)/(submit).
+  const INPUT_DEBOUNCE_MS = 200;
+  const inputTimers = new WeakMap();
+
+  document.addEventListener("input", (e) => {
+    if (!(e.target instanceof Element)) return;
+    const bound = e.target.closest("[data-liquid-input]");
+    if (!bound) return;
+    const root = bound.closest("[data-hydro-id]");
+    if (!root) return;
+    const prior = inputTimers.get(bound);
+    if (prior) clearTimeout(prior);
+    inputTimers.set(
+      bound,
+      setTimeout(() => {
+        inputTimers.delete(bound);
+        fire(root, bound.dataset.liquidInput, { value: bound.value });
+      }, INPUT_DEBOUNCE_MS),
+    );
+  });
+
+  document.addEventListener("change", (e) => {
+    if (!(e.target instanceof Element)) return;
+    const bound = e.target.closest("[data-liquid-change]");
+    if (!bound) return;
+    const root = bound.closest("[data-hydro-id]");
+    if (!root) return;
+    fire(root, bound.dataset.liquidChange, { value: bound.value });
+  });
+
   // Server push (D3): interactive pages hold one SSE stream for the whole
   // browser session; pushed patches are applied at their [data-hydro-id]
   // boundary. A reconnect — the server dropped us, or the network did —

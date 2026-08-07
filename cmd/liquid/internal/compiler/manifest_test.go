@@ -153,3 +153,20 @@ func TestManifestEmptyDirIsEmptyGraph(t *testing.T) {
 		t.Errorf("Components = %+v, want empty", graph.Components)
 	}
 }
+
+func TestManifestSurfacesInputAndChangeEvents(t *testing.T) {
+	graph := manifestOf(t, "field")
+
+	events := make(map[string][]string)
+	for _, c := range graph.Components {
+		for _, a := range c.Actions {
+			events[a.Name] = a.Events
+		}
+	}
+	if got := events["Typed"]; !reflect.DeepEqual(got, []string{"input"}) {
+		t.Errorf("Typed events = %v, want [input]", got)
+	}
+	if got := events["Committed"]; !reflect.DeepEqual(got, []string{"change"}) {
+		t.Errorf("Committed events = %v, want [change]", got)
+	}
+}

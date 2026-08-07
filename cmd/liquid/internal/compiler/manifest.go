@@ -90,7 +90,8 @@ type ManifestAction struct {
 	// TakesEvent reports the func(liquid.Event) shape (D11); false is the
 	// bare func() shape.
 	TakesEvent bool `json:"takesEvent"`
-	// Events are the binding kinds that wire this handler (click, submit),
+	// Events are the binding kinds that wire this handler (click, submit,
+	// input, change),
 	// sorted and de-duplicated.
 	Events []string `json:"events"`
 	// Guard reports a <Name>Guard boundary predicate (D30): a pure check the
@@ -220,6 +221,10 @@ func projectDirectives(sa *SourceAnalysis, sigByName map[string]Member) (interac
 			event = "click"
 		case kindSubmit:
 			event = "submit"
+		case kindInputEvent:
+			event = "input"
+		case kindChangeEvent:
+			event = "change"
 		default:
 			continue
 		}

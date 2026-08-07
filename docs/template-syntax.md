@@ -58,7 +58,16 @@ At build time the compiler:
 2. adds it to the component's **action allowlist** (compiler-generated from bindings — D10; the server only dispatches allowlisted actions),
 3. emits `data-liquid-action="TriggerReboot"`; the fixed runtime script wires the listener and posts `{hydroId, action, payload, csrfToken}` to the server.
 
-v0.1 supports `(click)` and `(submit)` (D12) — `(submit)` also exercises the `<form>` CSRF auto-injection below. `(input)` and `(change)` follow the same pattern later.
+Four event bindings are supported, all through the same allowlist + CSRF + payload-contract path:
+
+| Binding | Fires on | Emits | Payload sent |
+| --- | --- | --- | --- |
+| `(click)` | element click | `data-liquid-action` | none |
+| `(submit)` | `<form>` submit | `data-liquid-submit` | the form's fields (`<form>` CSRF auto-injection below) |
+| `(input)` | each keystroke, **debounced** (~200ms) to coalesce a typing burst | `data-liquid-input` | `{value}` — the element's current value |
+| `(change)` | commit (blur / select) | `data-liquid-change` | `{value}` — the element's current value |
+
+`(input)` and `(change)` send the bound element's value, so their handler takes a payload — read it with `e.String("value")` and constrain it with a `<Name>Guard` (D30) as with any payload action. Give a bound `(input)` element a stable `id` so a patch mid-typing preserves focus and the in-flight value (D21). `(input)` is debounced client-side; `(change)` dispatches immediately.
 
 ## Property (input) bindings — parent → child
 

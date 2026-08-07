@@ -282,12 +282,13 @@ func unguardedActionDiags(facts *Facts, structName string, sa *SourceAnalysis) [
 }
 
 // actionMethodNames returns the distinct handler names a template wires through
-// (click)/(submit), in first-seen order.
+// an event binding — (click)/(submit)/(input)/(change) — in first-seen order.
 func actionMethodNames(sa *SourceAnalysis) []string {
 	seen := make(map[string]bool)
 	var names []string
 	for _, use := range sa.Directives {
-		if use.Name != kindClick && use.Name != kindSubmit {
+		if use.Name != kindClick && use.Name != kindSubmit &&
+			use.Name != kindInputEvent && use.Name != kindChangeEvent {
 			continue
 		}
 		if !seen[use.Expr] {
