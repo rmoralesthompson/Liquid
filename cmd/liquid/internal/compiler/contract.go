@@ -27,12 +27,16 @@ import (
 )
 
 // ActionContract is the compiled D30 payload contract for one action: whether
-// it declares a boundary guard, and the closed-domain constraints the dispatch
-// seam enforces on the guard's payload fields.
+// it declares a boundary guard, whether its handler takes a typed payload, and
+// the closed-domain constraints the dispatch seam enforces on that payload.
 type ActionContract struct {
 	// Guard reports a <Name>Guard convention method — the boundary predicate
 	// the seam runs before the handler.
 	Guard bool
+	// Typed reports a typed payload parameter on the handler itself (#105,
+	// ADR-0004): the payload type is named to the compiler without a guard, so
+	// its closed-domain fields enforce and its Validate runs at the seam.
+	Typed bool
 	// Domains maps a payload field (named as declared) to the enumerated
 	// const-set values the seam admits, sorted and de-duplicated; empty when no
 	// field is closed-domain.
@@ -60,19 +64,48 @@ func (f *Facts) ActionContracts(structName string, actionNames []string) map[str
 		methods[fn.Name()] = fn
 	}
 	for _, name := range actionNames {
-		guard, ok := methods[name+"Guard"]
+		if guard, ok := methods[name+"Guard"]; ok {
+			payload := guardPayload(guard)
+			if payload == nil {
+				// A <Name>Guard of the wrong shape is a broken contract the
+				// runtime rejects at registration; not a valid guard to report.
+				continue
+			}
+			out[name] = ActionContract{Guard: true, Domains: f.closedDomains(payload)}
+			continue
+		}
+		// Unguarded: the handler's own typed payload parameter is the discovery
+		// anchor (#105, ADR-0004), so a closed-domain field enforces and a
+		// Validate runs without a guard.
+		h, ok := methods[name]
 		if !ok {
 			continue
 		}
-		payload := guardPayload(guard)
+		payload := handlerPayload(h)
 		if payload == nil {
-			// A <Name>Guard of the wrong shape is a broken contract the runtime
-			// rejects at registration; it is not a valid guard to report here.
 			continue
 		}
-		out[name] = ActionContract{Guard: true, Domains: f.closedDomains(payload)}
+		out[name] = ActionContract{Typed: true, Domains: f.closedDomains(payload)}
 	}
 	return out
+}
+
+// handlerPayload returns the typed payload struct of an action handler — its
+// first parameter when that is a struct other than liquid.Event — or nil (#105,
+// ADR-0004). It mirrors the runtime's actionShape: func(p <struct>) and
+// func(p <struct>, e liquid.Event) carry a payload; func() and
+// func(e liquid.Event) do not.
+func handlerPayload(fn *types.Func) *types.Struct {
+	sig, ok := fn.Type().(*types.Signature)
+	if !ok || sig.Results().Len() != 0 || sig.Params().Len() < 1 {
+		return nil
+	}
+	first := sig.Params().At(0).Type()
+	if isLiquidEvent(first) {
+		return nil
+	}
+	st, _ := first.Underlying().(*types.Struct)
+	return st
 }
 
 // guardPayload returns the payload struct of a D30 guard — the parameter type
@@ -263,7 +296,10 @@ func unguardedActionDiags(facts *Facts, structName string, sa *SourceAnalysis) [
 			// to constrain, and a non-handler is LSX008's to report.
 			continue
 		}
-		if contracts[name].Guard {
+		if contracts[name].Guard || contracts[name].Typed {
+			// A guard, or a typed payload parameter (#105, ADR-0004), names the
+			// payload to the seam — its closed domains enforce and a Validate
+			// runs. Only an untyped func(e liquid.Event) payload is unconstrained.
 			continue
 		}
 		diags = append(diags, Diagnostic{
@@ -272,10 +308,10 @@ func unguardedActionDiags(facts *Facts, structName string, sa *SourceAnalysis) [
 			Col:      m.Col,
 			Severity: SeverityWarning,
 			Code:     CodeUnguardedAction,
-			Message: fmt.Sprintf("action %s takes a client payload but declares no guard, so nothing constrains its payload values at the dispatch seam (D30)",
+			Message: fmt.Sprintf("action %s takes an untyped client payload but declares no guard, so nothing constrains its payload values at the dispatch seam (D30)",
 				name),
-			Suggestion: fmt.Sprintf("add func (c *%s) %sGuard(p <Payload>) bool to refuse an out-of-contract payload before the handler runs; a closed-domain (enum) payload field is enforced at the seam only when the action declares this guard (D30, ADR-0003)",
-				structName, name),
+			Suggestion: fmt.Sprintf("give %s a typed payload parameter — func (c *%s) %s(p <Payload>) — so its closed-domain fields enforce and a Validate runs, or add func (c *%s) %sGuard(p <Payload>) bool (D30, ADR-0004)",
+				name, structName, name, structName, name),
 		})
 	}
 	return diags

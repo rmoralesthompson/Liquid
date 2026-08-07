@@ -73,7 +73,7 @@ func TestBuildReportsClickHandlerWithWrongSignature(t *testing.T) {
 		Col:        20,
 		Severity:   compiler.SeverityError,
 		Code:       "LSX008",
-		Message:    "(click) handler Increment has signature func(n int); a handler is func() or func(e liquid.Event) (D11)",
+		Message:    "(click) handler Increment has signature func(n int); a handler is func(), func(e liquid.Event), func(p <Payload>), or func(p <Payload>, e liquid.Event) (D11, ADR-0004)",
 		Suggestion: "change the method to func (c *Badsig) Increment() or func (c *Badsig) Increment(e liquid.Event)",
 	}}
 	if !reflect.DeepEqual(diags, want) {
@@ -96,7 +96,7 @@ func TestBuildReportsEventHandlerWithResultAsInvalid(t *testing.T) {
 		Col:        19,
 		Severity:   compiler.SeverityError,
 		Code:       "LSX008",
-		Message:    "(submit) handler Rename has signature func(e liquid.Event) error; a handler is func() or func(e liquid.Event) (D11)",
+		Message:    "(submit) handler Rename has signature func(e liquid.Event) error; a handler is func(), func(e liquid.Event), func(p <Payload>), or func(p <Payload>, e liquid.Event) (D11, ADR-0004)",
 		Suggestion: "change the method to func (c *Badevent) Rename() or func (c *Badevent) Rename(e liquid.Event)",
 	}}
 	if !reflect.DeepEqual(diags, want) {

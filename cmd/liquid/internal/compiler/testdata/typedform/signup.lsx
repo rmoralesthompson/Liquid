@@ -1,0 +1,9 @@
+<div [hydroId] class="signup">
+  <form (submit)="Submit">
+    <input name="email">
+    <select name="plan">
+      <option>free</option>
+      <option>pro</option>
+    </select>
+  </form>
+</div>

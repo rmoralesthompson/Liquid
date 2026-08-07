@@ -34,24 +34,27 @@ The following are deliberately **not** in v0.1 (D4, and the Out-of-Scope list of
 
 Also, per D9, **there are no performance claims** in v0.1 — no "faster than X", no superlatives. There is now a measured, reproducible [benchmark baseline](benchmarks.md) (informational, single-machine, not a guarantee and not a comparison), but no comparative or superlative performance claim is made anywhere.
 
-## Payload contracts: closed domains need a guard
+## Payload contracts: untyped-payload closed domains need a guard
 
 The D30 value axis lets a payload field typed as a Go const-set (an enum) be a
 **closed domain** the dispatch seam enforces — an out-of-set value is refused
-before any handler runs. In v0.1 this enforcement is **coupled to declaring a
-boundary guard**: because a handler takes the untyped `liquid.Event`, the only
-place a payload type is named to the compiler is a
-`func (c *T) <Action>Guard(p <Payload>) bool` method's parameter. So a
-closed-domain field on an **unguarded** action is invisible to the compiler,
-never enumerated, and **not enforced** — writing the enum field is not, by
-itself, sufficient.
+before any handler runs. The compiler must be able to *see* the payload type to
+enumerate it. There are two ways to name it:
 
-**Concrete implication:** to get closed-domain enforcement, declare a guard for
-the action (even a `return true` guard that adds no extra check). An unguarded
-payload action instead earns the `LSX018` build warning, whose suggestion names
-this coupling. This is intended v0.1 behavior, not a bug — see
-[ADR-0003](adr/0003-closed-domain-guard-coupling.md) (D30). It will be revisited
-when typed-payload handlers make the payload type discoverable without a guard.
+- **A typed payload parameter** (`func (c *T) Submit(f Form)`, #105) — the
+  recommended shape. The compiler sees `Form` directly, so its closed-domain
+  fields enforce **without a guard**, and an optional `Validate() liquid.Errors`
+  runs at the seam. See [ADR-0004](adr/0004-typed-payload-handlers-and-validation.md).
+- **A boundary guard** (`func (c *T) SubmitGuard(p Form) bool`, D30) — names the
+  payload through the guard's parameter.
+
+**Residual limitation:** a handler that takes the **untyped** `liquid.Event`
+(`func (c *T) Submit(e liquid.Event)`) names no payload type, so a closed-domain
+value it reads by string key is **not** enforced unless the action also declares
+a guard. Such an action earns the `LSX018` build warning. To constrain values,
+prefer a typed payload; a guard is the alternative. This residual coupling is
+recorded in [ADR-0003](adr/0003-closed-domain-guard-coupling.md), amended by
+ADR-0004 (D30).
 
 ## API stability: `v0.x`, no backward-compat promise
 

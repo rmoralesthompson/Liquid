@@ -52,21 +52,21 @@ func TestVetWarnsUnguardedPayloadAction(t *testing.T) {
 		Col:        19,
 		Severity:   compiler.SeverityWarning,
 		Code:       "LSX018",
-		Message:    "action Rename takes a client payload but declares no guard, so nothing constrains its payload values at the dispatch seam (D30)",
-		Suggestion: "add func (c *Renamer) RenameGuard(p <Payload>) bool to refuse an out-of-contract payload before the handler runs; a closed-domain (enum) payload field is enforced at the seam only when the action declares this guard (D30, ADR-0003)",
+		Message:    "action Rename takes an untyped client payload but declares no guard, so nothing constrains its payload values at the dispatch seam (D30)",
+		Suggestion: "give Rename a typed payload parameter — func (c *Renamer) Rename(p <Payload>) — so its closed-domain fields enforce and a Validate runs, or add func (c *Renamer) RenameGuard(p <Payload>) bool (D30, ADR-0004)",
 	}}
 	if !reflect.DeepEqual(diags, want) {
 		t.Errorf("diagnostics = %+v, want %+v", diags, want)
 	}
 }
 
-// TestUnguardedClosedDomainIsNotEnforced pins the documented v0.1 gap #85 /
-// ADR-0003: a closed-domain enum field on an action that declares no guard is
-// invisible to the contract compiler (the payload struct is named to go/types
-// only through a guard's parameter), so it is neither enumerated into
-// PayloadDomains nor enforced at the seam — the author gets the LSX018
-// unguarded-action warning instead. If typed-payload handlers later make the
-// payload discoverable without a guard, this expectation should flip.
+// TestUnguardedClosedDomainIsNotEnforced pins the residual #85 gap after
+// ADR-0004: an untyped func(e liquid.Event) handler still names no payload type
+// to the compiler, so a closed-domain enum it carries is neither enumerated into
+// PayloadDomains nor enforced without a guard — the author gets LSX018. The fix
+// ADR-0004 provides is a typed payload parameter (proven by
+// TestTypedPayloadHandlerEnforcesClosedDomainWithoutGuard); this Event handler
+// does not adopt one, so the coupling persists for it.
 func TestUnguardedClosedDomainIsNotEnforced(t *testing.T) {
 	dir := copyFixture(t, "prefs")
 
@@ -98,8 +98,8 @@ func TestUnguardedClosedDomainIsNotEnforced(t *testing.T) {
 		Col:        17,
 		Severity:   compiler.SeverityWarning,
 		Code:       "LSX018",
-		Message:    "action SetPriority takes a client payload but declares no guard, so nothing constrains its payload values at the dispatch seam (D30)",
-		Suggestion: "add func (c *Prefs) SetPriorityGuard(p <Payload>) bool to refuse an out-of-contract payload before the handler runs; a closed-domain (enum) payload field is enforced at the seam only when the action declares this guard (D30, ADR-0003)",
+		Message:    "action SetPriority takes an untyped client payload but declares no guard, so nothing constrains its payload values at the dispatch seam (D30)",
+		Suggestion: "give SetPriority a typed payload parameter — func (c *Prefs) SetPriority(p <Payload>) — so its closed-domain fields enforce and a Validate runs, or add func (c *Prefs) SetPriorityGuard(p <Payload>) bool (D30, ADR-0004)",
 	}}
 	if diags := vet(t, dir); !reflect.DeepEqual(diags, want) {
 		t.Errorf("diagnostics = %+v, want %+v", diags, want)
@@ -134,5 +134,37 @@ func TestManifestSurfacesGuardAndClosedDomains(t *testing.T) {
 	}}
 	if !reflect.DeepEqual(graph.Components[0].Actions, wantActions) {
 		t.Errorf("Actions = %+v, want %+v", graph.Components[0].Actions, wantActions)
+	}
+}
+
+// TestTypedPayloadHandlerEnforcesClosedDomainWithoutGuard proves the #105 /
+// ADR-0004 resolution of #85: a closed-domain field on a typed-payload handler
+// is enumerated into PayloadDomains and enforced at the seam without a guard,
+// and the handler draws neither LSX008 (it is a valid shape) nor LSX018 (it is
+// not unconstrained).
+func TestTypedPayloadHandlerEnforcesClosedDomainWithoutGuard(t *testing.T) {
+	dir := copyFixture(t, "typedform")
+
+	for _, d := range build(t, dir) {
+		if d.Severity == compiler.SeverityError {
+			t.Fatalf("unexpected error diagnostic: %+v", d)
+		}
+		if d.Code == "LSX018" {
+			t.Errorf("a typed-payload handler must not draw the unguarded-action warning: %+v", d)
+		}
+	}
+
+	gen, err := os.ReadFile(filepath.Join(dir, "signup_gen.go"))
+	if err != nil {
+		t.Fatalf("expected signup_gen.go: %v", err)
+	}
+	got := string(gen)
+	if !strings.Contains(got, "func (c *Signup) PayloadDomains()") {
+		t.Errorf("no PayloadDomains generated; a typed payload's closed domain must enforce without a guard\n--- generated ---\n%s", got)
+	}
+	for _, want := range []string{`"Submit"`, `"plan"`, `"free"`, `"pro"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("PayloadDomains missing %q\n--- generated ---\n%s", want, got)
+		}
 	}
 }
