@@ -25,6 +25,7 @@ prior Liquid knowledge assumed; every command is copy-pasteable.
 ## Documentation
 
 - [Architecture](docs/architecture.md) — the authoritative spec
+- [Deployment](docs/deployment.md) — taking a Liquid app to production
 - [Template syntax (`.lsx`)](docs/template-syntax.md) — directive reference
 - [Changelog](CHANGELOG.md) — release history, starting at v0.1.0
 - [Design decisions](docs/design-decisions.md) — the D1–D30 decision log
