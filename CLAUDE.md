@@ -1,14 +1,16 @@
 # Liquid — Project Guidelines
 
-Liquid is a server-driven UI framework for Go (Angular-style component model, LiveView-style interactivity, agent-first tooling). **Greenfield: no Go code exists yet.** The design lives in `docs/`:
+Liquid is a server-driven UI framework for Go (Angular-style component model, LiveView-style interactivity, agent-first tooling). **v0.1.0 is shipped** — the core runtime (`core/`), the `.lsx` compiler and dev server (`cmd/liquid/`), and the `liquidtest` harness are implemented, with runnable example apps in `examples/`. It is a `v0.x` release with no backward-compatibility promise. The design docs remain authoritative for intent:
 
+- `CHANGELOG.md` — release history, starting at v0.1.0
 - `docs/REPORT.md` — analysis of the original design material; known defects to avoid
 - `docs/architecture.md` — authoritative architecture spec
 - `docs/template-syntax.md` — `.lsx` directive reference
-- `docs/design-decisions.md` — open questions (check before assuming a decision is settled)
+- `docs/design-decisions.md` — the D1–D30 decision log (check before assuming a decision is settled)
+- `docs/limitations.md` — what v0.1 does not do yet; `docs/roadmap.md` — what's next
 - `docs/source/` — raw exploratory material; **inspiration only, not reference code** (snippets there do not compile and contain known security/correctness bugs)
 
-## Build & Test (once code exists)
+## Build & Test
 
 - Build: `go build ./...`
 - Test: `go test -v -race ./...`
