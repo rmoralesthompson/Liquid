@@ -8,7 +8,7 @@ Server-driven UI in Go: an Angular-style component model, LiveView-style interac
 
 <p align="center"><em>The <a href="examples/dashboard">example dashboard</a> — a live market ticker, a server-rendered SVG chart, a click counter, an SSE-pushed metric, and a CSRF-protected form, all driven from Go over fetch + SSE.</em></p>
 
-**Status:** early implementation — the core runtime, the `.lsx` compiler, and the dev server are in place, with a full example app in [`examples/dashboard`](examples/dashboard). Design phase complete (24 settled decisions).
+**Status:** **v0.1.0** — first tagged release. The core runtime, the `.lsx` compiler, the dev server, and the `liquidtest` harness are in place, with a full example app in [`examples/dashboard`](examples/dashboard). Built on 30 settled design decisions (D1–D30). This is a `v0.x` release with no backward-compatibility promise; see the [changelog](CHANGELOG.md) and [limitations](docs/limitations.md).
 
 ## Quickstart
 
@@ -24,7 +24,8 @@ prior Liquid knowledge assumed; every command is copy-pasteable.
 
 - [Architecture](docs/architecture.md) — the authoritative spec
 - [Template syntax (`.lsx`)](docs/template-syntax.md) — directive reference
-- [Design decisions](docs/design-decisions.md) — the D1–D24 decision log
+- [Changelog](CHANGELOG.md) — release history, starting at v0.1.0
+- [Design decisions](docs/design-decisions.md) — the D1–D30 decision log
 - [Analysis report](docs/REPORT.md) — review of the original design material
 - [Handoff](docs/HANDOFF.md) — current state and build order
 
