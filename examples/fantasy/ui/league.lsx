@@ -125,12 +125,15 @@
     .top-toggle__lead { margin-left: auto; font-size: .58rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); }
     .top-toggle__chev { color: var(--dim); font-size: .7rem; }
 
-    /* your team's tile links to the full lineup */
+    /* each matchup tile links to that team's full lineup */
     .tile-link { text-decoration: none; color: inherit; cursor: pointer; position: relative; }
     .tile-link:hover { border-color: rgba(53,245,140,.6); box-shadow: 0 0 0 1px rgba(53,245,140,.25); }
     .tile-link:focus-visible { outline: 2px solid var(--you); outline-offset: 2px; }
     .tile-link__hint { margin-top: .45rem; font-size: .66rem; font-weight: 800; letter-spacing: .02em; color: var(--you); opacity: .85; }
     .tile-link:hover .tile-link__hint { opacity: 1; }
+    .tile-link--opp:hover { border-color: rgba(255,176,32,.6); box-shadow: 0 0 0 1px rgba(255,176,32,.25); }
+    .tile-link--opp:focus-visible { outline-color: var(--opp); }
+    .tile-link__hint--opp { color: var(--opp); }
 
     /* expanded top-starters list (from your live lineup) */
     .starters { display: grid; gap: .3rem; margin-top: .9rem; padding-top: .8rem; border-top: 1px solid var(--line); }
@@ -143,7 +146,7 @@
 
     /* standings table */
     .table { display: flex; flex-direction: column; }
-    .table__row { display: grid; grid-template-columns: 2.3rem 1fr 2.6rem 3.2rem; align-items: center; gap: .4rem; padding: .5rem .3rem; border-bottom: 1px solid var(--line); }
+    .table__row { display: grid; grid-template-columns: 2.3rem 1fr 2.6rem 3.2rem .9rem; align-items: center; gap: .4rem; padding: .5rem .3rem; border-bottom: 1px solid var(--line); }
     .table__row:last-child { border-bottom: none; }
     .table__row--head { font-size: .58rem; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); font-weight: 800; padding-bottom: .35rem; }
     .table__row--you { background: linear-gradient(90deg, rgba(53,245,140,.1), transparent); border-radius: 8px; box-shadow: inset 0 0 0 1px rgba(53,245,140,.25); }
@@ -157,6 +160,12 @@
     .table__mgr { display: block; font-size: .68rem; color: var(--dim); }
     .col--rec { font-variant-numeric: tabular-nums; color: var(--muted); font-size: .85rem; text-align: center; }
     .col--pf { font-variant-numeric: tabular-nums; font-weight: 800; text-align: right; font-size: .9rem; }
+    .col--go { text-align: right; color: var(--dim); font-weight: 800; font-size: 1.05rem; line-height: 1; }
+    /* each standings row links to that team's full lineup */
+    .table__row--link { text-decoration: none; color: inherit; cursor: pointer; border-radius: 8px; transition: background .12s, box-shadow .12s; }
+    .table__row--link:hover { background: rgba(255,255,255,.04); box-shadow: inset 0 0 0 1px rgba(53,245,140,.28); }
+    .table__row--link:focus-visible { outline: 2px solid var(--you); outline-offset: -2px; }
+    .table__row--link:hover .col--go { color: var(--you); }
 
     /* gameday ticker */
     .ticker-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: flex; align-items: stretch; background: rgba(8,11,15,.94); backdrop-filter: blur(8px); border-top: 1px solid var(--line); overflow: hidden; }
@@ -209,7 +218,7 @@
 
   <footer class="footer">
     Fictional demo data, generated live &mdash; no real players, clubs, or leagues.
-    <a href="/team">View your full lineup &rarr;</a>
+    <a href="/team/{{ TeamSlug }}">View your full lineup &rarr;</a>
   </footer>
 
   <app-ticker></app-ticker>

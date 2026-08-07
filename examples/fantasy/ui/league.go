@@ -6,11 +6,12 @@ import liquid "github.com/rmoralesthompson/liquid/core"
 // owns the stylesheet and brand header and nests the three live cards: the
 // weekly matchup, the league standings, and the gameday ticker.
 type League struct {
-	Name   string // league name, shown in the brand bar
-	Week   string // e.g. "Week 5"
-	Team   string // your fantasy team name
-	Record string // your record, e.g. "3-2"
-	Rank   string // your standing, e.g. "5th of 10"
+	Name     string // league name, shown in the brand bar
+	Week     string // e.g. "Week 5"
+	Team     string // your fantasy team name
+	TeamSlug string // your team's slug — the "view lineup" links target /team/{TeamSlug}
+	Record   string // your record, e.g. "3-2"
+	Rank     string // your standing, e.g. "5th of 10"
 }
 
 func (l *League) Selector() string { return "app-league" }

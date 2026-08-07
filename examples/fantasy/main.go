@@ -92,12 +92,12 @@ var lineupShape = []struct {
 	{"WR", 19.0}, {"WR", 20.0}, {"TE", 14.0}, {"FLX", 17.0},
 }
 
-// seedLineup builds the starting roster from randomly generated fictional names
-// and teams (see the IRON-CLAD RULE). It draws from a fixed PRNG seed so the
-// roster is deterministic — the first paint and tests are stable — while still
-// being assembled at random, never hand-picked.
-func seedLineup() []starter {
-	r := rand.New(rand.NewPCG(1487, 9973))
+// seedLineupWith builds a starting roster from randomly generated fictional
+// names and teams (see the IRON-CLAD RULE), drawing from the given PRNG seed so
+// each team's roster is deterministic — stable first paint and tests — while
+// still being assembled at random, never hand-picked.
+func seedLineupWith(a, b uint64) []starter {
+	r := rand.New(rand.NewPCG(a, b))
 	out := make([]starter, len(lineupShape))
 	for i, slot := range lineupShape {
 		name := firstNames[r.IntN(len(firstNames))] + " " + lastNames[r.IntN(len(lastNames))]
@@ -111,6 +111,9 @@ func seedLineup() []starter {
 	}
 	return out
 }
+
+// seedLineup is your team's roster — the one the live board drives.
+func seedLineup() []starter { return seedLineupWith(1487, 9973) }
 
 func playersOf(ss []starter) []ui.Player {
 	out := make([]ui.Player, len(ss))
@@ -305,20 +308,71 @@ func gamesOf(clubs []club, scores [][2]float64) []ui.MiniGame {
 	return out
 }
 
+// ---- per-team lineups (feed the /team/:id page) ----------------------------
+
+// opponentIndex maps each club index to its week-5 opponent: you (0) vs your
+// opponent (1), plus the around-the-league pairings, both directions.
+func opponentIndex() map[int]int {
+	opp := map[int]int{0: 1, 1: 0}
+	for _, p := range slatePairs {
+		opp[p[0]], opp[p[1]] = p[1], p[0]
+	}
+	return opp
+}
+
+// buildStore assembles the per-team lineup lookup for /team/:id. Your team
+// carries no roster — its lineup is the live board the roster child renders —
+// while every other team gets a deterministic, seeded static roster.
+func buildStore(clubs []club) *ui.TeamStore {
+	opp := opponentIndex()
+	m := make(map[string]ui.TeamLineup, len(clubs))
+	for i, c := range clubs {
+		manager := "mgr. " + c.manager
+		if c.isYou {
+			manager = c.name
+		}
+		tl := ui.TeamLineup{
+			Slug:     ui.Slugify(c.name),
+			Name:     c.name,
+			Manager:  manager,
+			Record:   record(c),
+			Opponent: clubs[opp[i]].name,
+			IsYou:    c.isYou,
+		}
+		if !c.isYou {
+			ss := seedLineupWith(uint64(1000+i*37), uint64(7000+i*53))
+			tl.Players = playersOf(ss)
+			sum := 0.0
+			for _, s := range ss {
+				sum += s.points
+			}
+			tl.Total = fmt.Sprintf("%.1f", sum)
+		}
+		m[tl.Slug] = tl
+	}
+	return ui.NewTeamStore(m)
+}
+
 // ---- wiring ----------------------------------------------------------------
 
-// newApp wires the example: the four live feeds as injectable services, the
-// interactive cards as child components, and the two routes. Tests build the
-// same app around their own subjects.
-func newApp(
-	board *liquid.BehaviorSubject[[]ui.Player],
-	weekly *liquid.BehaviorSubject[ui.MatchState],
-	table *liquid.BehaviorSubject[[]ui.TeamStanding],
-	feed *liquid.BehaviorSubject[[]ui.TickerItem],
-	slate *liquid.BehaviorSubject[[]ui.MiniGame],
-) (*liquid.App, error) {
+// services bundles the live feeds and the team store the app injects. Bundling
+// keeps newApp to a single parameter (and under the argument-count lint) as the
+// dependency set grows. Tests build the same struct around their own subjects.
+type services struct {
+	board  *liquid.BehaviorSubject[[]ui.Player]
+	weekly *liquid.BehaviorSubject[ui.MatchState]
+	table  *liquid.BehaviorSubject[[]ui.TeamStanding]
+	feed   *liquid.BehaviorSubject[[]ui.TickerItem]
+	slate  *liquid.BehaviorSubject[[]ui.MiniGame]
+	store  *ui.TeamStore
+}
+
+// newApp wires the example: the live feeds and team store as injectable
+// services, the interactive cards as child components, and the routes — the
+// dashboard and the parameterised team lineup page.
+func newApp(s services) (*liquid.App, error) {
 	app := liquid.New()
-	for _, svc := range []any{board, weekly, table, feed, slate} {
+	for _, svc := range []any{s.board, s.weekly, s.table, s.feed, s.slate, s.store} {
 		if err := app.Provide(svc); err != nil {
 			return nil, fmt.Errorf("providing %T: %w", svc, err)
 		}
@@ -328,11 +382,11 @@ func newApp(
 			return nil, fmt.Errorf("registering %s: %w", child.Selector(), err)
 		}
 	}
-	if err := app.Route("/", &ui.League{Name: "The Gridiron Guild", Week: "Week 5", Team: "Thunder Yaks", Record: "3-1", Rank: "3"}); err != nil {
+	if err := app.Route("/", &ui.League{Name: "The Gridiron Guild", Week: "Week 5", Team: "Thunder Yaks", TeamSlug: ui.Slugify("Thunder Yaks"), Record: "3-1", Rank: "3"}); err != nil {
 		return nil, fmt.Errorf("routing /: %w", err)
 	}
-	if err := app.Route("/team", &ui.Lineup{Week: "Week 5", Manager: "Thunder Yaks", Opponent: "Neon Comets"}); err != nil {
-		return nil, fmt.Errorf("routing /team: %w", err)
+	if err := app.Route("/team/:id", &ui.Lineup{}); err != nil {
+		return nil, fmt.Errorf("routing /team/:id: %w", err)
 	}
 	return app, nil
 }
@@ -436,7 +490,14 @@ func main() {
 	ticker := liquid.NewBehaviorSubject(feed)
 	slate := liquid.NewBehaviorSubject(gamesOf(clubs, scores))
 
-	app, err := newApp(board, weekly, table, ticker, slate)
+	app, err := newApp(services{
+		board:  board,
+		weekly: weekly,
+		table:  table,
+		feed:   ticker,
+		slate:  slate,
+		store:  buildStore(clubs),
+	})
 	if err != nil {
 		logger.Error("wiring app", "err", err)
 		os.Exit(1)

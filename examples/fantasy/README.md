@@ -4,8 +4,10 @@ A live **fantasy-football league dashboard**. The first page (`/`) shows your
 weekly head-to-head, the league standings, the other matchups around the league,
 and a gameday news-and-stats ticker along the bottom — **every score, ladder,
 and ticker item streaming in over SSE** from server-side feeds, with no client
-charting library and no JS framework. A second page (`/team`) is the interactive
-starting lineup with server-drawn SVG headshots.
+charting library and no JS framework. A parameterised second page (`/team/:id`)
+shows **any league team's full lineup** — your team's is the live roster, every
+other team's is a seeded static one — reachable by clicking a matchup tile or a
+standings row.
 
 It's a fuller counterpart to the [`dashboard`](../dashboard) example: four
 independent live feeds fan out to five interactive cards across two pages.
@@ -33,11 +35,11 @@ needed after editing a `.lsx` template or a component struct.
 | Piece | Files | Subsystem |
 | --- | --- | --- |
 | League dashboard (page 1) | `ui/league.{go,lsx}` | routed page — theme + brand bar — nesting the four live cards below |
-| Weekly matchup | `ui/matchup.{go,lsx}` | your head-to-head: live scores that **flash on each change**, projections, an SVG win-probability bar; **your team's tile links to the full lineup**; the **top performer is wired to your live roster**, with a `(click)` toggle that expands your top four |
-| League standings | `ui/standings.{go,lsx}` | `*goFor` ladder that re-sorts server-side as points-for tick up; a `(click)` **Full / Top 6** toggle and an `(input)` **search box** that filters by team or manager |
+| Weekly matchup | `ui/matchup.{go,lsx}` | your head-to-head: live scores that **flash on each change**, projections, an SVG win-probability bar; **both tiles link to that team's full lineup**; the **top performer is wired to your live roster**, with a `(click)` toggle that expands your top four |
+| League standings | `ui/standings.{go,lsx}` | `*goFor` ladder that re-sorts server-side as points-for tick up; **every row links to that team's lineup**; a `(click)` **Full / Top 6** toggle and an `(input)` **search box** that filters by team or manager |
 | Around the league | `ui/around.{go,lsx}` | the week's other matchups, live scores; **click a game to feature it** — the row expands to a win-probability bar (the `(click)` carries the game's index as a typed payload) |
 | Gameday ticker | `ui/ticker.{go,lsx}` | a rolling window of fictional news/stat items, pinned to the bottom, **scrolling right-to-left** (a duplicated CSS-animated track), pushed as they "happen" |
-| Starting lineup (page 2) | `ui/lineup.{go,lsx}` + `ui/roster.{go,lsx}` | a full lineup view on the same broadcast theme: a top nav that links **back to the dashboard**, a matchup hero, a live projected total, and `*goFor` rows with position-coloured badges, server-drawn SVG headshots, and per-player projection bars |
+| Team lineup (`/team/:id`) | `ui/lineup.{go,lsx}` + `ui/roster.{go,lsx}` + `ui/team.go` | any team's full lineup on the same broadcast theme, resolved from the `:id` slug via an injected `TeamStore`: a top nav that links **back to the dashboard**, a matchup hero, a projected total, and `*goFor` rows with position-coloured badges, server-drawn SVG headshots, and per-player projection bars. Your team renders the **live** roster (SSE); every other team a **static** seeded one; an unknown slug shows a not-found panel |
 | Models | `ui/model.go`, `ui/player.go` | display formatting — all numbers preformatted on the server; templates do no arithmetic |
 
 ### The data flow
@@ -80,8 +82,11 @@ pulsing live pills, and a full-width ticker. All CSS is inline in
 
 `main_test.go` drives the app through `liquidtest`: the dashboard renders all
 three cards with the right row/item counts, a standings update is pushed over
-SSE, and — on `/team` — the seeded lineup renders, a projection update arrives
-on the stream, and the live region declares `aria-live="polite"` (D21). Run:
+SSE, and — on your team's `/team/:id` page — the seeded lineup renders, a
+projection update arrives on the stream, and the live region declares
+`aria-live="polite"` (D21). Further tests pin the navigation: both matchup tiles
+and every standings row link to the right team's lineup, another team's page
+renders its static roster, and an unknown slug shows the not-found panel. Run:
 
 ```sh
 go test -race ./examples/fantasy

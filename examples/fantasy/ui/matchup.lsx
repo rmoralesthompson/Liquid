@@ -8,7 +8,7 @@
   </div>
 
   <div class="score">
-    <a class="score__side score__side--you tile-link" href="/team" aria-label="Open your full lineup">
+    <a class="score__side score__side--you tile-link" href="/team/{{ You.Slug }}" aria-label="Open your full lineup">
       <div class="score__team">{{ You.Team }}</div>
       <div class="score__mgr">{{ You.Manager }} <span class="dot">·</span> {{ You.Record }}</div>
       <div class="score__pts {{ PulseClass }}">{{ You.Score }}</div>
@@ -22,13 +22,13 @@
       <span class="score__tag">Win&nbsp;probability</span>
     </div>
 
-    <div class="score__side score__side--opp">
+    <a class="score__side score__side--opp tile-link tile-link--opp" href="/team/{{ Opp.Slug }}" aria-label="Open your opponent's full lineup">
       <div class="score__team">{{ Opp.Team }}</div>
       <div class="score__mgr">{{ Opp.Manager }} <span class="dot">·</span> {{ Opp.Record }}</div>
       <div class="score__pts {{ PulseClass }}">{{ Opp.Score }}</div>
       <div class="score__proj">proj {{ Opp.Proj }}</div>
-      <div class="score__top">{{ Opp.Top }}</div>
-    </div>
+      <span class="tile-link__hint tile-link__hint--opp">View lineup <span aria-hidden="true">&rarr;</span></span>
+    </a>
   </div>
 
   <button class="top-toggle" (click)="ToggleStarters" aria-label="Toggle your top starters">

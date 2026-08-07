@@ -15,6 +15,7 @@ import (
 // Side is one team in the weekly head-to-head.
 type Side struct {
 	Team    string // fantasy team name
+	Slug    string // URL slug — the tile links to /team/{Slug}
 	Manager string // fictional manager
 	Record  string // e.g. "4-1"
 	Score   string // live points, e.g. "78.4"
@@ -27,6 +28,7 @@ type Side struct {
 func MakeSide(team, manager, record string, score, proj float64, top string, isYou bool) Side {
 	return Side{
 		Team:    team,
+		Slug:    Slugify(team),
 		Manager: manager,
 		Record:  record,
 		Score:   fmt.Sprintf("%.1f", score),
@@ -63,6 +65,7 @@ func MakeMatch(you, opp Side, clock string, winPct int, leading bool) MatchState
 type TeamStanding struct {
 	Rank      string
 	Name      string
+	Slug      string // URL slug — the row links to /team/{Slug}
 	Manager   string
 	Record    string
 	PointsFor string
@@ -80,6 +83,7 @@ func MakeStanding(rank int, name, manager, record string, pointsFor float64, row
 	return TeamStanding{
 		Rank:      fmt.Sprintf("%d", rank),
 		Name:      name,
+		Slug:      Slugify(name),
 		Manager:   manager,
 		Record:    record,
 		PointsFor: fmt.Sprintf("%.1f", pointsFor),

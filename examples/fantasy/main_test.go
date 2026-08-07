@@ -51,7 +51,14 @@ func newHarness(t *testing.T) (*liquidtest.Harness, feeds) {
 		ticker: liquid.NewBehaviorSubject(seedTicker()),
 		slate:  liquid.NewBehaviorSubject(gamesOf(clubs, seedSlate())),
 	}
-	app, err := newApp(f.board, f.weekly, f.table, f.ticker, f.slate)
+	app, err := newApp(services{
+		board:  f.board,
+		weekly: f.weekly,
+		table:  f.table,
+		feed:   f.ticker,
+		slate:  f.slate,
+		store:  buildStore(clubs),
+	})
 	if err != nil {
 		t.Fatalf("newApp: %v", err)
 	}
@@ -129,7 +136,7 @@ func standingsRowFor(table []ui.TeamStanding, name string) string {
 
 func TestRosterRendersSeededLineup(t *testing.T) {
 	h, _ := newHarness(t)
-	page := h.Get("/team")
+	page := h.Get("/team/thunder-yaks")
 	if page.Code != http.StatusOK {
 		t.Fatalf("GET /team = %d, want 200\n--- body ---\n%s", page.Code, page.Body)
 	}
@@ -147,7 +154,7 @@ func TestRosterRendersSeededLineup(t *testing.T) {
 
 func TestProjectionUpdateIsPushedOverSSE(t *testing.T) {
 	h, f := newHarness(t)
-	h.Get("/team")
+	h.Get("/team/thunder-yaks")
 
 	stream := h.Stream()
 	defer stream.Close()
@@ -177,7 +184,7 @@ func TestProjectionUpdateIsPushedOverSSE(t *testing.T) {
 
 func TestRosterRegionDeclaresAriaLive(t *testing.T) {
 	h, _ := newHarness(t)
-	page := h.Get("/team")
+	page := h.Get("/team/thunder-yaks")
 	doc, err := html.Parse(strings.NewReader(page.Body))
 	if err != nil {
 		t.Fatalf("parsing page: %v", err)
@@ -352,26 +359,82 @@ func TestStandingsSearchFilters(t *testing.T) {
 
 func TestLineupPageNavigatesBackToDashboard(t *testing.T) {
 	h, _ := newHarness(t)
-	page := h.Get("/team")
+	page := h.Get("/team/thunder-yaks")
 	if page.Code != http.StatusOK {
-		t.Fatalf("GET /team = %d, want 200", page.Code)
+		t.Fatalf("GET /team/thunder-yaks = %d, want 200", page.Code)
 	}
 	// The lineup page offers a link back to the dashboard.
 	if !strings.Contains(page.Body, `href="/"`) {
 		t.Error("lineup page has no link back to the dashboard")
 	}
-	// ...and the dashboard links out to the lineup.
+	// ...and the dashboard links out to team lineups.
 	dash := h.Get("/")
-	if !strings.Contains(dash.Body, `href="/team"`) {
-		t.Error("dashboard has no link to the full lineup")
+	if !strings.Contains(dash.Body, `href="/team/`) {
+		t.Error("dashboard has no link to a team lineup")
 	}
 }
 
-func TestMatchupYouTileLinksToLineup(t *testing.T) {
+func TestMatchupTilesLinkToLineups(t *testing.T) {
 	h, _ := newHarness(t)
 	page := h.Get("/")
-	// Your team's tile in the matchup is a link to your full lineup.
-	if !strings.Contains(page.Body, `tile-link" href="/team"`) {
-		t.Error("the matchup 'you' tile does not link to /team")
+	// Your team's tile links to your lineup; the opponent's tile links to theirs.
+	if !strings.Contains(page.Body, `tile-link" href="/team/thunder-yaks"`) {
+		t.Error("the matchup 'you' tile does not link to /team/thunder-yaks")
+	}
+	if !strings.Contains(page.Body, `href="/team/neon-comets"`) {
+		t.Error("the matchup opponent tile does not link to /team/neon-comets")
+	}
+	if !strings.Contains(page.Body, "tile-link--opp") {
+		t.Error("the opponent tile is not rendered as a link")
+	}
+}
+
+func TestStandingsRowsLinkToLineups(t *testing.T) {
+	h, _ := newHarness(t)
+	page := h.Get("/")
+	// Every standings team row is a link to that team's lineup.
+	if rows := strings.Count(page.Body, `class="table__row table__row--link`); rows != len(clubNames) {
+		t.Errorf("standings row links = %d, want %d (one per team)", rows, len(clubNames))
+	}
+	// A representative team's row targets its slug.
+	if !strings.Contains(page.Body, `href="/team/velvet-hammers"`) {
+		t.Error("standings row does not link to /team/velvet-hammers")
+	}
+}
+
+func TestOpponentLineupRendersStaticRoster(t *testing.T) {
+	h, _ := newHarness(t)
+	page := h.Get("/team/neon-comets")
+	if page.Code != http.StatusOK {
+		t.Fatalf("GET /team/neon-comets = %d, want 200", page.Code)
+	}
+	// The opponent's page names the team and shows this week's opponent (you).
+	if !strings.Contains(page.Body, "Neon Comets") {
+		t.Error("opponent lineup page missing the team name")
+	}
+	if !strings.Contains(page.Body, "Thunder Yaks") {
+		t.Error("opponent lineup page missing this week's opponent (your team)")
+	}
+	// It renders a full seeded roster — one position badge per starter — and a
+	// projected total, without the live board (that is your team's page only).
+	if rows := strings.Count(page.Body, `class="player__pos `); rows != len(lineupShape) {
+		t.Errorf("opponent roster rendered %d rows, want %d", rows, len(lineupShape))
+	}
+	if !strings.Contains(page.Body, "PROJ TOTAL") {
+		t.Error("opponent lineup page missing the projected total")
+	}
+	if strings.Contains(page.Body, `id="roster"`) {
+		t.Error("opponent page should render the static roster, not the live board")
+	}
+}
+
+func TestUnknownTeamShowsNotFound(t *testing.T) {
+	h, _ := newHarness(t)
+	page := h.Get("/team/no-such-team")
+	if page.Code != http.StatusOK {
+		t.Fatalf("GET /team/no-such-team = %d, want 200", page.Code)
+	}
+	if !strings.Contains(page.Body, "Team not found") {
+		t.Error("unknown team slug did not render the not-found panel")
 	}
 }
