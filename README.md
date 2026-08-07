@@ -10,7 +10,7 @@ Server-driven UI in Go: an Angular-style component model, LiveView-style interac
 
 <p align="center"><em>The <a href="examples/dashboard">example dashboard</a> — a live market ticker, a server-rendered SVG chart, a click counter, an SSE-pushed metric, and a CSRF-protected form, all driven from Go over fetch + SSE.</em></p>
 
-**Status:** **v0.1.0** — first tagged release. The core runtime, the `.lsx` compiler, the dev server, and the `liquidtest` harness are in place, with a full example app in [`examples/dashboard`](examples/dashboard). Built on 30 settled design decisions (D1–D30). This is a `v0.x` release with no backward-compatibility promise; see the [changelog](CHANGELOG.md) and [limitations](docs/limitations.md).
+**Status:** **v1.0.0** — production-ready. The core runtime, the `.lsx` compiler, the dev server, and the `liquidtest` harness, plus production serving (graceful shutdown + SSE draining), health/metrics, forms & validation, in-place DOM morphing, and auth — with a full example app in [`examples/dashboard`](examples/dashboard). Built on 30 settled design decisions (D1–D30) and [7 ADRs](docs/adr). **The public API is committed** — backward-compatibility guarantees begin at 1.0 (semver). Ships single-node; the durable/multi-node session store is additive on the [roadmap](docs/roadmap.md). See the [changelog](CHANGELOG.md), [deployment guide](docs/deployment.md), and [limitations](docs/limitations.md).
 
 ## Quickstart
 
