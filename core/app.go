@@ -31,6 +31,7 @@ type App struct {
 	static     http.Handler             // file server mounted at /static/, nil until Static
 	hydro      hydroRegistry            // live interactive instances (D15)
 	csrfSecret []byte                   // HMAC key for CSRF tokens, minted per process (D15)
+	authSecret []byte                   // HMAC key for signed identity cookies, minted per process (#108); separate from csrfSecret so a CSRF-secret leak cannot forge identity
 	limits     Limits                   // registry and request bounds, defaults applied (D20)
 	now        func() time.Time         // the App's clock; crypto real time in prod, pinnable in tests for idle-expiry and deterministic-render control (D28)
 	rand       io.Reader                // opaque-token CSPRNG source (D15); crypto/rand.Reader in every build, replaceable only in-package for deterministic render (D28)
@@ -190,6 +191,11 @@ func New(opts ...Option) *App {
 		panic(fmt.Sprintf("liquid: generating CSRF secret: %v", err))
 	}
 	a.csrfSecret = secret
+	authSecret := make([]byte, 32)
+	if _, err := io.ReadFull(a.rand, authSecret); err != nil {
+		panic(fmt.Sprintf("liquid: generating auth secret: %v", err))
+	}
+	a.authSecret = authSecret
 	a.initDev()
 	return a
 }
@@ -422,7 +428,15 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := Ctx{Context: r.Context(), params: params, req: r}
+	// Resolve identity once (#108) so guards and OnInit can read it. The render
+	// path is read-only: Login/Logout are event-path operations (ADR-0007).
+	sessionID := sessionFromRequest(r)
+	ctx := Ctx{Context: r.Context(), params: params, req: r, auth: &authScope{
+		app:       a,
+		r:         r,
+		sessionID: sessionID,
+		principal: a.resolvePrincipal(r, sessionID),
+	}}
 	if !a.runGuards(w, r, rt, ctx) {
 		return
 	}
