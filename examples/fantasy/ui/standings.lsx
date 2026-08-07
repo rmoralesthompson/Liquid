@@ -4,7 +4,10 @@
       <span class="panel__kicker">The Gridiron Guild</span>
       <h2 class="panel__title">League Standings</h2>
     </div>
-    <span class="live-pill" aria-hidden="true"><span class="live-dot"></span>LIVE</span>
+    <div class="seg" role="group" aria-label="Standings view">
+      <button class="seg__btn {{ FullClass }}" (click)="ShowFull">Full</button>
+      <button class="seg__btn {{ PlayoffClass }}" (click)="ShowPlayoff">Top 6</button>
+    </div>
   </div>
 
   <div class="table" role="table" aria-label="League standings table">

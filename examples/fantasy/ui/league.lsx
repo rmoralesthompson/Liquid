@@ -88,6 +88,29 @@
     .winbar__you strong { font-weight: 800; }
     .winbar__opp { color: var(--opp); }
 
+    /* segmented toggle (standings view) */
+    .seg { display: inline-flex; background: rgba(255,255,255,.04); border: 1px solid var(--line); border-radius: 999px; padding: 2px; }
+    .seg__btn { appearance: none; border: none; background: transparent; color: var(--muted); font: inherit; font-size: .66rem; font-weight: 800; letter-spacing: .02em; padding: .28rem .72rem; border-radius: 999px; cursor: pointer; transition: color .15s, background .15s; }
+    .seg__btn:hover { color: var(--ink); }
+    .seg__btn--on { background: var(--you); color: #04160c; }
+
+    /* top-starter toggle on the matchup */
+    .top-toggle { display: inline-flex; align-items: center; gap: .45rem; margin-top: .5rem; appearance: none; border: 1px solid var(--line); background: rgba(255,255,255,.03); color: var(--muted); font: inherit; font-size: .74rem; padding: .32rem .55rem; border-radius: 9px; cursor: pointer; transition: border-color .15s, color .15s; }
+    .top-toggle:hover { border-color: rgba(53,245,140,.4); color: var(--ink); }
+    .top-toggle__pos { font-size: .56rem; font-weight: 900; letter-spacing: .06em; color: var(--dim); }
+    .top-toggle__name { font-weight: 700; }
+    .top-toggle__pts { font-weight: 800; color: var(--you); font-variant-numeric: tabular-nums; }
+    .top-toggle__chev { color: var(--dim); font-size: .7rem; }
+
+    /* expanded top-starters list (from your live lineup) */
+    .starters { display: grid; gap: .3rem; margin-top: .9rem; padding-top: .8rem; border-top: 1px solid var(--line); }
+    .starters__head { font-size: .58rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); margin-bottom: .1rem; }
+    .starter { display: grid; grid-template-columns: 2.4rem 1fr auto auto; align-items: center; gap: .55rem; font-size: .82rem; }
+    .starter__pos { font-size: .56rem; font-weight: 900; letter-spacing: .06em; color: var(--dim); }
+    .starter__name { font-weight: 700; }
+    .starter__team { font-size: .66rem; color: var(--dim); }
+    .starter__pts { font-weight: 800; color: var(--you); font-variant-numeric: tabular-nums; }
+
     /* standings table */
     .table { display: flex; flex-direction: column; }
     .table__row { display: grid; grid-template-columns: 2.3rem 1fr 2.6rem 3.2rem; align-items: center; gap: .4rem; padding: .5rem .3rem; border-bottom: 1px solid var(--line); }
@@ -108,10 +131,12 @@
     /* gameday ticker */
     .ticker-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: flex; align-items: stretch; background: rgba(8,11,15,.94); backdrop-filter: blur(8px); border-top: 1px solid var(--line); overflow: hidden; }
     .ticker-bar__brand { display: flex; align-items: center; gap: .45rem; padding: 0 .95rem; font-size: .66rem; font-weight: 900; letter-spacing: .14em; color: var(--you); background: rgba(53,245,140,.08); border-right: 1px solid var(--line); white-space: nowrap; }
-    .ticker-bar__rail { display: flex; overflow-x: auto; scrollbar-width: none; flex: 1; }
-    .ticker-bar__rail::-webkit-scrollbar { display: none; }
-    .tick { display: inline-flex; align-items: center; gap: .5rem; padding: .7rem .95rem; white-space: nowrap; border-right: 1px solid var(--line); font-size: .78rem; animation: flash .9s ease-out; }
-    @keyframes flash { from { background: rgba(53,245,140,.14); } to { background: transparent; } }
+    .ticker-bar__rail { display: flex; overflow: hidden; flex: 1; }
+    /* the whole track scrolls right-to-left, continuously, to signal a live feed */
+    .ticker-track { display: flex; flex: none; animation: marquee 42s linear infinite; }
+    .ticker-track:hover { animation-play-state: paused; }
+    @keyframes marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+    .tick { display: inline-flex; align-items: center; gap: .5rem; padding: .7rem .95rem; white-space: nowrap; border-right: 1px solid var(--line); font-size: .78rem; }
     .tick__kind { font-size: .55rem; font-weight: 900; letter-spacing: .1em; padding: .13rem .42rem; border-radius: 4px; }
     .tick--stat .tick__kind { color: #08170d; background: var(--you); }
     .tick--news .tick__kind { color: #241700; background: var(--opp); }

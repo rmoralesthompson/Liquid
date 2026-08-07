@@ -1,10 +1,19 @@
-<section [hydroId] id="ticker" class="ticker-bar" aria-live="polite" aria-label="Live news and stats">
+<section [hydroId] id="ticker" class="ticker-bar" aria-live="off" aria-label="Live gameday news and stats">
   <span class="ticker-bar__brand" aria-hidden="true"><span class="live-dot"></span>GAMEDAY</span>
-  <div class="ticker-bar__rail" role="list">
-    <span class="tick tick--{{ $i.KindClass }}" role="listitem" *goFor="let i of Items">
-      <span class="tick__kind">{{ $i.Kind }}</span>
-      <span class="tick__team">{{ $i.Team }}</span>
-      <span class="tick__text">{{ $i.Text }}</span>
-    </span>
+  <div class="ticker-bar__rail">
+    <!-- Two identical copies scroll as one track; translating it -50% loops
+         seamlessly, so the feed streams right-to-left without a visible seam. -->
+    <div class="ticker-track">
+      <span class="tick tick--{{ $i.KindClass }}" role="listitem" *goFor="let i of Items">
+        <span class="tick__kind">{{ $i.Kind }}</span>
+        <span class="tick__team">{{ $i.Team }}</span>
+        <span class="tick__text">{{ $i.Text }}</span>
+      </span>
+      <span class="tick tick--{{ $j.KindClass }}" aria-hidden="true" *goFor="let j of Items">
+        <span class="tick__kind">{{ $j.Kind }}</span>
+        <span class="tick__team">{{ $j.Team }}</span>
+        <span class="tick__text">{{ $j.Text }}</span>
+      </span>
+    </div>
   </div>
 </section>
