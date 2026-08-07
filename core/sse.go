@@ -277,7 +277,11 @@ func (a *App) serveHydroSSE(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
-		defer a.hydro.detachStream(ck.Value, stream)
+		a.metrics.StreamOpened()
+		defer func() {
+			a.hydro.detachStream(ck.Value, stream)
+			a.metrics.StreamClosed()
+		}()
 	}
 
 	w.Header().Set("Content-Type", "text/event-stream")

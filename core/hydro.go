@@ -282,6 +282,17 @@ func (h *hydroRegistry) expireIdle(now time.Time, idle time.Duration) {
 	}
 }
 
+// len returns the number of live sessions in the registry — the gauge behind
+// App.LiveSessions. Safe on a never-used (nil) registry.
+func (h *hydroRegistry) len() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.lru == nil {
+		return 0
+	}
+	return h.lru.Len()
+}
+
 // drainAll disconnects every live session — stopping each entry's subscription
 // pump and deferred loader and closing every open SSE stream — so in-flight SSE
 // handlers, which return only on their stream closing or their request context
