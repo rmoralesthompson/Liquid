@@ -117,12 +117,20 @@
     @keyframes bumpB { 0% { text-shadow: 0 0 18px rgba(255,255,255,.6); } 100% { text-shadow: none; } }
 
     /* top-starter toggle on the matchup */
-    .top-toggle { display: inline-flex; align-items: center; gap: .45rem; margin-top: .5rem; appearance: none; border: 1px solid var(--line); background: rgba(255,255,255,.03); color: var(--muted); font: inherit; font-size: .74rem; padding: .32rem .55rem; border-radius: 9px; cursor: pointer; transition: border-color .15s, color .15s; }
-    .top-toggle:hover { border-color: rgba(53,245,140,.4); color: var(--ink); }
+    .top-toggle { display: flex; align-items: center; gap: .5rem; width: 100%; margin-top: .9rem; appearance: none; border: 1px solid var(--line); background: rgba(255,255,255,.03); color: var(--muted); font: inherit; font-size: .76rem; padding: .45rem .6rem; border-radius: 10px; cursor: pointer; transition: border-color .15s, color .15s, background .15s; }
+    .top-toggle:hover { border-color: rgba(53,245,140,.4); color: var(--ink); background: rgba(53,245,140,.04); }
     .top-toggle__pos { font-size: .56rem; font-weight: 900; letter-spacing: .06em; color: var(--dim); }
     .top-toggle__name { font-weight: 700; }
     .top-toggle__pts { font-weight: 800; color: var(--you); font-variant-numeric: tabular-nums; }
+    .top-toggle__lead { margin-left: auto; font-size: .58rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); }
     .top-toggle__chev { color: var(--dim); font-size: .7rem; }
+
+    /* your team's tile links to the full lineup */
+    .tile-link { text-decoration: none; color: inherit; cursor: pointer; position: relative; }
+    .tile-link:hover { border-color: rgba(53,245,140,.6); box-shadow: 0 0 0 1px rgba(53,245,140,.25); }
+    .tile-link:focus-visible { outline: 2px solid var(--you); outline-offset: 2px; }
+    .tile-link__hint { margin-top: .45rem; font-size: .66rem; font-weight: 800; letter-spacing: .02em; color: var(--you); opacity: .85; }
+    .tile-link:hover .tile-link__hint { opacity: 1; }
 
     /* expanded top-starters list (from your live lineup) */
     .starters { display: grid; gap: .3rem; margin-top: .9rem; padding-top: .8rem; border-top: 1px solid var(--line); }

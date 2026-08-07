@@ -366,3 +366,12 @@ func TestLineupPageNavigatesBackToDashboard(t *testing.T) {
 		t.Error("dashboard has no link to the full lineup")
 	}
 }
+
+func TestMatchupYouTileLinksToLineup(t *testing.T) {
+	h, _ := newHarness(t)
+	page := h.Get("/")
+	// Your team's tile in the matchup is a link to your full lineup.
+	if !strings.Contains(page.Body, `tile-link" href="/team"`) {
+		t.Error("the matchup 'you' tile does not link to /team")
+	}
+}
