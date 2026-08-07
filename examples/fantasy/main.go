@@ -290,7 +290,7 @@ func seedSlate() [][2]float64 {
 func gamesOf(clubs []club, scores [][2]float64) []ui.MiniGame {
 	out := make([]ui.MiniGame, len(slatePairs))
 	for i, p := range slatePairs {
-		out[i] = ui.MakeMiniGame(clubs[p[0]].name, clubs[p[1]].name, scores[i][0], scores[i][1])
+		out[i] = ui.MakeMiniGame(i, clubs[p[0]].name, clubs[p[1]].name, scores[i][0], scores[i][1])
 	}
 	return out
 }

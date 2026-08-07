@@ -64,7 +64,7 @@ Four event bindings are supported, all through the same allowlist + CSRF + paylo
 
 | Binding | Fires on | Emits | Payload sent |
 | --- | --- | --- | --- |
-| `(click)` | element click | `data-liquid-action` | none |
+| `(click)` | element click | `data-liquid-action` | the element's `data-*` attributes (e.g. `data-id="3"` → `e.String("id")`, or a typed payload field) |
 | `(submit)` | `<form>` submit | `data-liquid-submit` | the form's fields (`<form>` CSRF auto-injection below) |
 | `(input)` | each keystroke, **debounced** (~200ms) to coalesce a typing burst | `data-liquid-input` | `{value}` — the element's current value |
 | `(change)` | commit (blur / select) | `data-liquid-change` | `{value}` — the element's current value |

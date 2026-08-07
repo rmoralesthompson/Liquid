@@ -11,7 +11,7 @@
     <div class="score__side score__side--you">
       <div class="score__team">{{ You.Team }}</div>
       <div class="score__mgr">{{ You.Manager }} <span class="dot">·</span> {{ You.Record }}</div>
-      <div class="score__pts">{{ You.Score }}</div>
+      <div class="score__pts {{ PulseClass }}">{{ You.Score }}</div>
       <div class="score__proj">proj {{ You.Proj }}</div>
       <button class="top-toggle" (click)="ToggleStarters" aria-label="Toggle your top starters">
         <span class="top-toggle__pos">{{ TopStarter.Pos }}</span>
@@ -30,7 +30,7 @@
     <div class="score__side score__side--opp">
       <div class="score__team">{{ Opp.Team }}</div>
       <div class="score__mgr">{{ Opp.Manager }} <span class="dot">·</span> {{ Opp.Record }}</div>
-      <div class="score__pts">{{ Opp.Score }}</div>
+      <div class="score__pts {{ PulseClass }}">{{ Opp.Score }}</div>
       <div class="score__proj">proj {{ Opp.Proj }}</div>
       <div class="score__top">{{ Opp.Top }}</div>
     </div>
