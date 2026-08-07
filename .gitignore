@@ -34,3 +34,6 @@ editors/vscode-lsx/*.vsix
 .DS_Store
 .idea/
 .vscode/
+
+# Generated products / personal dashboards (not part of the framework)
+/products/
