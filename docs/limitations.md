@@ -32,7 +32,7 @@ The following are deliberately **not** in v0.1 (D4, and the Out-of-Scope list of
 - **Interceptor chains** — plain `net/http` middleware (`http.Handler`) suffices for v0.1; there is no framework interceptor pipeline.
 - **Other deferred items:** scoped per-component assets, blueprint catalog, attribute-directive registry, hierarchical DI, URL/history patching, and state-preserving hot reload (`liquid dev` does a full refresh on rebuild, D16).
 
-Also, per D9, **there are no performance claims and no benchmarks** in v0.1 — no "faster than X", no latency or throughput numbers, until they are measured.
+Also, per D9, **there are no performance claims** in v0.1 — no "faster than X", no superlatives. There is now a measured, reproducible [benchmark baseline](benchmarks.md) (informational, single-machine, not a guarantee and not a comparison), but no comparative or superlative performance claim is made anywhere.
 
 ## API stability: `v0.x`, no backward-compat promise
 

@@ -3,7 +3,7 @@
 # The example targets run an app under `liquid dev` (watch + rebuild + reload)
 # on http://localhost:8080. Run one at a time — they share the port.
 
-.PHONY: help dashboard fantasy build test fmt lint
+.PHONY: help dashboard fantasy build test bench fmt lint
 
 # Default: list the targets.
 help:
@@ -28,6 +28,11 @@ build:
 
 test:
 	go test -race ./...
+
+# Run the baseline benchmarks (informational; see docs/benchmarks.md).
+# -race is intentionally off: it perturbs timing/alloc numbers.
+bench:
+	go test -run '^$$' -bench . -benchmem ./core
 
 fmt:
 	go fmt ./...
