@@ -2,10 +2,66 @@
 
 All notable changes to Liquid are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Liquid follows
-[semantic versioning](https://semver.org/spec/v2.0.0.html). While in the `v0.x`
-range there is **no backward-compatibility promise** — APIs, template
-directives, the JSON manifest schema, and wire formats may change between minor
-versions (D24, D26).
+[semantic versioning](https://semver.org/spec/v2.0.0.html). **Backward-compatibility
+guarantees begin at 1.0** (D24): from v1.0.0 the public Go API, `.lsx` template
+directives, and the wire/manifest formats follow semver — breaking changes wait
+for a new major version. (Through the `v0.x` range there was no such promise.)
+
+## [1.0.0] — 2026-08-07
+
+The **production-ready** release. Everything from v0.1.0 plus operational
+hardening, a forms/validation layer, in-place DOM morphing, and auth — and the
+public API is now **committed** (backward-compatibility guarantees begin here,
+D24). Ships single-node by default; the durable/multi-node session store stays
+additive on the roadmap ([ADR-0002](docs/adr/0002-single-node-sessions-v0.1.md)).
+
+### Added — operational
+- **`App.Serve(ctx, ServeConfig)`** — production HTTP server with graceful
+  shutdown that **drains live SSE streams**, sane timeouts (`ReadHeaderTimeout`,
+  `IdleTimeout`; no `WriteTimeout`, which would sever SSE), and optional TLS.
+  Wire `signal.NotifyContext` for `SIGINT`/`SIGTERM`.
+- **Health probes** `/liquid/health` (liveness) and `/liquid/ready` (readiness,
+  `503` while draining) under the framework namespace.
+- **`Metrics`** — a dependency-free observability seam (`WithMetrics`) reporting
+  page renders, `/hydro-event` dispatches, and SSE connect/disconnect, plus
+  `App.LiveSessions()` as a gauge.
+- **[Deployment guide](docs/deployment.md)** — TLS/reverse-proxy, sticky
+  sessions, health checks, graceful shutdown, SSE proxy-buffering, containers.
+
+### Added — interactivity
+- **`(input)` and `(change)` event bindings** (`(input)` debounced ~200ms),
+  through the same allowlist + CSRF + payload-contract path as `(click)`/`(submit)`.
+- **In-place DOM morphing** of patches (vendored [Idiomorph](https://github.com/bigskysoftware/idiomorph),
+  [ADR-0005](docs/adr/0005-dom-morphing.md)) — preserves scroll, focus, media,
+  CSS transitions, and keyed-list identity instead of a wholesale swap.
+
+### Added — forms & validation ([ADR-0004](docs/adr/0004-typed-payload-handlers-and-validation.md))
+- **Typed payload handlers** — `func (c *C) Submit(f Form)` (and
+  `func(f Form, e liquid.Event)`): the framework binds the payload, enforces D30
+  closed domains, and runs an optional `Validate() liquid.Errors`, calling the
+  handler only when valid.
+- **`liquid.Errors`** and the **`Validator`** interface for per-field validation
+  rendered back into the component.
+- A typed payload names its type to the compiler, so **closed-domain fields
+  enforce without a guard** — closing the #85 gap (ADR-0003 amended).
+
+### Added — auth ([ADR-0007](docs/adr/0007-auth-and-authorization.md))
+- **Session-bound identity**: `ctx.Principal()`, and event-path `ctx.Login()` /
+  `ctx.Logout()` backed by a signed `liquid_auth` cookie.
+- **Authorization guards**: `RequireAuthenticated()` / `RequireAuthenticatedElse(path)`,
+  composing with `WithGuard`.
+- **Login rotates the session id**, which (because CSRF binds to it) voids
+  pre-login CSRF tokens — the session-fixation defense D15 called for.
+
+### Changed
+- The document shell loads the morph library before the runtime script.
+- CHANGELOG/README/limitations updated for the committed 1.0 API.
+
+### Deferred (on the roadmap, not in 1.0)
+- **WebSocket transport** — kept out to preserve the stdlib-only transport;
+  added when a real latency-bound case appears ([ADR-0006](docs/adr/0006-defer-websocket-past-v1.md)).
+- **Durable / multi-node session store** — the `Snapshot()/Restore()` seam is
+  ready; the backend lands additively in a later release (ADR-0002).
 
 ## [0.1.0] — 2026-08-06
 
@@ -104,4 +160,5 @@ with a Redis-backed store on the [v0.2 roadmap](docs/roadmap.md), decided in
 DOM-diffing yet; and **`v0.x`, no backward-compat promise**. Per D9, Liquid
 makes no comparative or superlative performance claims.
 
+[1.0.0]: https://github.com/rmoralesthompson/Liquid/releases/tag/v1.0.0
 [0.1.0]: https://github.com/rmoralesthompson/Liquid/releases/tag/v0.1.0
