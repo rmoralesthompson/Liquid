@@ -8,18 +8,13 @@
   </div>
 
   <div class="score">
-    <div class="score__side score__side--you">
+    <a class="score__side score__side--you tile-link" href="/team" aria-label="Open your full lineup">
       <div class="score__team">{{ You.Team }}</div>
       <div class="score__mgr">{{ You.Manager }} <span class="dot">·</span> {{ You.Record }}</div>
       <div class="score__pts {{ PulseClass }}">{{ You.Score }}</div>
       <div class="score__proj">proj {{ You.Proj }}</div>
-      <button class="top-toggle" (click)="ToggleStarters" aria-label="Toggle your top starters">
-        <span class="top-toggle__pos">{{ TopStarter.Pos }}</span>
-        <span class="top-toggle__name">{{ TopStarter.Name }}</span>
-        <span class="top-toggle__pts">{{ TopStarter.Points }}</span>
-        <span class="top-toggle__chev" aria-hidden="true">&#9662;</span>
-      </button>
-    </div>
+      <span class="tile-link__hint">View lineup <span aria-hidden="true">&rarr;</span></span>
+    </a>
 
     <div class="score__mid">
       <span class="score__clock">{{ Clock }}</span>
@@ -35,6 +30,14 @@
       <div class="score__top">{{ Opp.Top }}</div>
     </div>
   </div>
+
+  <button class="top-toggle" (click)="ToggleStarters" aria-label="Toggle your top starters">
+    <span class="top-toggle__pos">{{ TopStarter.Pos }}</span>
+    <span class="top-toggle__name">{{ TopStarter.Name }}</span>
+    <span class="top-toggle__pts">{{ TopStarter.Points }}</span>
+    <span class="top-toggle__lead">top performer</span>
+    <span class="top-toggle__chev" aria-hidden="true">&#9662;</span>
+  </button>
 
   <div class="starters" *goIf="Expanded">
     <div class="starters__head">Your top starters &middot; live</div>

@@ -33,7 +33,7 @@ needed after editing a `.lsx` template or a component struct.
 | Piece | Files | Subsystem |
 | --- | --- | --- |
 | League dashboard (page 1) | `ui/league.{go,lsx}` | routed page — theme + brand bar — nesting the four live cards below |
-| Weekly matchup | `ui/matchup.{go,lsx}` | your head-to-head: live scores that **flash on each change**, projections, an SVG win-probability bar; the **top performer is wired to your live roster**, with a `(click)` toggle that expands your top four |
+| Weekly matchup | `ui/matchup.{go,lsx}` | your head-to-head: live scores that **flash on each change**, projections, an SVG win-probability bar; **your team's tile links to the full lineup**; the **top performer is wired to your live roster**, with a `(click)` toggle that expands your top four |
 | League standings | `ui/standings.{go,lsx}` | `*goFor` ladder that re-sorts server-side as points-for tick up; a `(click)` **Full / Top 6** toggle and an `(input)` **search box** that filters by team or manager |
 | Around the league | `ui/around.{go,lsx}` | the week's other matchups, live scores; **click a game to feature it** — the row expands to a win-probability bar (the `(click)` carries the game's index as a typed payload) |
 | Gameday ticker | `ui/ticker.{go,lsx}` | a rolling window of fictional news/stat items, pinned to the bottom, **scrolling right-to-left** (a duplicated CSS-animated track), pushed as they "happen" |
