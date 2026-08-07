@@ -300,6 +300,27 @@ func (h *hydroRegistry) expireIdle(now time.Time, idle time.Duration) {
 	}
 }
 
+// rotateSession re-keys a live session from old to new, migrating its component
+// instances and open streams under the new id — so a login/logout can rotate the
+// session id (fixation defense, D15) without losing live state. A no-op when old
+// names no live session (e.g. a login before any interactive render). Callers
+// must not hold h.mu; they may hold a session's dispatch lock (the one-way lock
+// order permits taking h.mu under dispatch).
+func (h *hydroRegistry) rotateSession(old, new string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.sessions == nil || old == new {
+		return
+	}
+	elem, ok := h.sessions[old]
+	if !ok {
+		return
+	}
+	delete(h.sessions, old)
+	elem.Value.(*hydroSession).id = new
+	h.sessions[new] = elem
+}
+
 // len returns the number of live sessions in the registry — the gauge behind
 // App.LiveSessions. Safe on a never-used (nil) registry.
 func (h *hydroRegistry) len() int {
@@ -431,15 +452,7 @@ func (a *App) ensureSession(w http.ResponseWriter, r *http.Request) (string, err
 	if err != nil {
 		return "", fmt.Errorf("minting session ID: %w", err)
 	}
-	a.warnInsecureCookie(r)
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookieName,
-		Value:    id,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   true,
-		SameSite: http.SameSiteLaxMode,
-	})
+	a.setSessionCookie(w, r, id)
 	return id, nil
 }
 
@@ -597,9 +610,22 @@ func actionShape(t reflect.Type) (takesEvent bool, payloadArg reflect.Type, err 
 	return false, nil, fmt.Errorf("must have signature func(), func(e liquid.Event), func(p <Payload>), or func(p <Payload>, e liquid.Event), got %s", t)
 }
 
-// eventArg builds the liquid.Event a handler receives (D11).
-func eventArg(r *http.Request, payload map[string]string, reply *eventReply) reflect.Value {
-	return reflect.ValueOf(Event{Ctx: NewCtx(r, nil), fields: payload, reply: reply})
+// eventDispatch carries the per-event inputs shared down the dispatch path
+// (request, wire payload, reply sink, and the auth scope), so the handful of
+// functions that thread them stay within the argument budget.
+type eventDispatch struct {
+	r       *http.Request
+	payload map[string]string
+	reply   *eventReply
+	auth    *authScope
+}
+
+// eventArg builds the liquid.Event a handler receives (D11), carrying the
+// request's auth scope (#108) so a handler can read Principal and Login/Logout.
+func eventArg(d *eventDispatch) reflect.Value {
+	ctx := NewCtx(d.r, nil)
+	ctx.auth = d.auth
+	return reflect.ValueOf(Event{Ctx: ctx, fields: d.payload, reply: d.reply})
 }
 
 // payloadArgs builds a handler's call arguments and, for a typed-payload
@@ -608,15 +634,15 @@ func eventArg(r *http.Request, payload map[string]string, reply *eventReply) ref
 // unless the payload is a Validator that rejected it), and a bind error (a value
 // that will not bind into the typed struct). For func()/func(e liquid.Event) it
 // is the identity over the pre-#105 behavior with no validation.
-func (a *App) payloadArgs(act action, r *http.Request, payload map[string]string, reply *eventReply) ([]reflect.Value, Errors, error) {
+func (a *App) payloadArgs(act action, d *eventDispatch) ([]reflect.Value, Errors, error) {
 	if act.payloadArg == nil {
 		if !act.takesEvent {
 			return nil, Errors{}, nil
 		}
-		return []reflect.Value{eventArg(r, payload, reply)}, Errors{}, nil
+		return []reflect.Value{eventArg(d)}, Errors{}, nil
 	}
 	p := reflect.New(act.payloadArg).Elem()
-	if err := bindStruct(p, payload); err != nil {
+	if err := bindStruct(p, d.payload); err != nil {
 		return nil, Errors{}, err
 	}
 	var errs Errors
@@ -625,7 +651,7 @@ func (a *App) payloadArgs(act action, r *http.Request, payload map[string]string
 	}
 	args := []reflect.Value{p}
 	if act.takesEvent {
-		args = append(args, eventArg(r, payload, reply))
+		args = append(args, eventArg(d))
 	}
 	return args, errs, nil
 }
@@ -637,11 +663,11 @@ func (a *App) payloadArgs(act action, r *http.Request, payload map[string]string
 // out-of-contract value, or one that will not bind) — a 400 the caller writes.
 // Callers hold the dispatch lock (D20), as the guard, Validate, and handler may
 // read or mutate component state.
-func (a *App) runAction(st *hydroState, act action, r *http.Request, payload map[string]string, reply *eventReply) (rejectMsg string, ok bool) {
-	if !payloadContractOK(st.inst, act, payload) {
+func (a *App) runAction(st *hydroState, act action, d *eventDispatch) (rejectMsg string, ok bool) {
+	if !payloadContractOK(st.inst, act, d.payload) {
 		return "payload rejected", false
 	}
-	args, valErrs, bindErr := a.payloadArgs(act, r, payload, reply)
+	args, valErrs, bindErr := a.payloadArgs(act, d)
 	if bindErr != nil {
 		return "malformed event payload", false
 	}
@@ -787,6 +813,10 @@ func (a *App) serveHydroEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	reply := &eventReply{}
+	// The event-path auth scope (#108): a handler may read Principal and, unlike
+	// other paths, Login/Logout — which rotate the session id here (mutable).
+	auth := &authScope{app: a, w: w, r: r, sessionID: ck.Value, principal: a.resolvePrincipal(r, ck.Value), mutable: true}
+	d := &eventDispatch{r: r, payload: ev.Payload, reply: reply, auth: auth}
 
 	sess.dispatch.Lock()
 	// A deferred instance whose background load has not published yet is not
@@ -801,7 +831,7 @@ func (a *App) serveHydroEvent(w http.ResponseWriter, r *http.Request) {
 	// handler — all under the dispatch lock, in the settled refusal order
 	// (D15/D30/#105). A guard or Validate may read component state, so this
 	// serializes with the instance's other events (D20).
-	if msg, ok := a.runAction(st, act, r, ev.Payload, reply); !ok {
+	if msg, ok := a.runAction(st, act, d); !ok {
 		sess.dispatch.Unlock()
 		http.Error(w, msg, http.StatusBadRequest)
 		return
@@ -817,8 +847,11 @@ func (a *App) serveHydroEvent(w http.ResponseWriter, r *http.Request) {
 		// render's fixed horizon (D15/D2, #46); the runtime restamps it into
 		// the liquid-csrf meta tag and the swapped subtree's csrf_token
 		// inputs. A redirect answer navigates away, so it carries no token.
-		env.Patch, renderErr = a.renderStateLocked(st, ck.Value)
-		env.CSRF = mintCSRF(a.csrfSecret, ck.Value, a.limits.SessionIdleTimeout, a.now())
+		// auth.sessionID reflects any rotation a Login/Logout in the handler just
+		// performed (#108): the re-render and re-minted CSRF bind to the current
+		// session, and the new session cookie was already set on the response.
+		env.Patch, renderErr = a.renderStateLocked(st, auth.sessionID)
+		env.CSRF = mintCSRF(a.csrfSecret, auth.sessionID, a.limits.SessionIdleTimeout, a.now())
 	}
 	sess.dispatch.Unlock()
 	if renderErr != nil {
