@@ -46,15 +46,17 @@ Replaces the element's text content with a server-side translation looked up by 
 <button (click)="TriggerReboot">Reset</button>
 ```
 
-Binds a browser event to an exported method on the component struct. Handlers have exactly one of two signatures (enforced by `liquid vet` at build time — D11):
+Binds a browser event to an exported method on the component struct. Handlers have one of four signatures (enforced by `liquid vet` at build time — D11, ADR-0004):
 
 ```go
 func (c *C) TriggerReboot()                    // no payload
-func (c *C) RenameDashboard(e liquid.Event)    // needs data: typed accessors + e.Bind(&struct)
+func (c *C) RenameDashboard(e liquid.Event)    // untyped payload: e.String("x"), e.Bind(&struct)
+func (c *C) Submit(f SignupForm)               // typed payload: bound + validated for you (#105)
+func (c *C) Submit(f SignupForm, e liquid.Event) // typed payload + Event (for e.Redirect)
 ```
 
 At build time the compiler:
-1. verifies the method exists on the paired struct with one of the two signatures above,
+1. verifies the method exists on the paired struct with one of the four signatures above,
 2. adds it to the component's **action allowlist** (compiler-generated from bindings — D10; the server only dispatches allowlisted actions),
 3. emits `data-liquid-action="TriggerReboot"`; the fixed runtime script wires the listener and posts `{hydroId, action, payload, csrfToken}` to the server.
 
@@ -67,7 +69,49 @@ Four event bindings are supported, all through the same allowlist + CSRF + paylo
 | `(input)` | each keystroke, **debounced** (~200ms) to coalesce a typing burst | `data-liquid-input` | `{value}` — the element's current value |
 | `(change)` | commit (blur / select) | `data-liquid-change` | `{value}` — the element's current value |
 
-`(input)` and `(change)` send the bound element's value, so their handler takes a payload — read it with `e.String("value")` and constrain it with a `<Name>Guard` (D30) as with any payload action. Give a bound `(input)` element a stable `id` so a patch mid-typing preserves focus and the in-flight value (D21). `(input)` is debounced client-side; `(change)` dispatches immediately.
+`(input)` and `(change)` send the bound element's value, so their handler takes a payload. Give a bound `(input)` element a stable `id` so a patch mid-typing preserves focus and the in-flight value (D21). `(input)` is debounced client-side; `(change)` dispatches immediately.
+
+### Typed payloads and form validation
+
+For anything beyond a single value — a form — declare a **typed payload struct** as the handler's parameter. The framework binds the posted fields into it, enforces any D30 closed-domain (enum) fields, runs an optional `Validate` method, and calls the handler **only if the payload is valid** (#105, ADR-0004):
+
+```go
+type SignupForm struct {
+    Email string
+    Plan  Plan // a closed-domain enum (D30) — enforced at the seam for free
+}
+
+// Optional: validation is plain Go, no rule DSL.
+func (f SignupForm) Validate() liquid.Errors {
+    var errs liquid.Errors
+    if !strings.Contains(f.Email, "@") {
+        errs.Add("Email", "enter a valid email")
+    }
+    return errs
+}
+
+func (c *Signup) Submit(f SignupForm) { c.Saved = f.Email } // only reached when valid
+```
+
+On a validation failure the handler is skipped and the component re-renders with the errors. To show them, give the component a field of type `liquid.Errors` (the framework fills it before the re-render and clears it on success) and render per field:
+
+```go
+type Signup struct {
+    HydroID   string
+    CSRFToken string
+    Errors    liquid.Errors
+    Saved     string
+}
+```
+
+```html
+<form (submit)="Submit">
+  <input name="email">
+  {{ range .Errors.For "Email" }}<p class="error">{{ . }}</p>{{ end }}
+</form>
+```
+
+Binding supports `string` and `int` fields (and named types over them, like an enum). A typed payload names its type to the compiler, so — unlike an untyped `liquid.Event` handler — its closed-domain fields enforce **without** a guard. Take `(f SignupForm, e liquid.Event)` if the handler also needs `e.Redirect` (e.g. redirect after a successful submit).
 
 ## Property (input) bindings — parent → child
 

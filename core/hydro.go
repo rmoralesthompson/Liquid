@@ -487,6 +487,10 @@ func stringFieldIndex(t reflect.Type, name string) int {
 type action struct {
 	idx        int
 	takesEvent bool
+	// payloadArg is the handler's typed payload-struct parameter (#105,
+	// ADR-0004), into which the seam binds the wire payload before validating
+	// and dispatching; nil for a func() / func(e liquid.Event) handler.
+	payloadArg reflect.Type
 	// guardIdx is the method index of the <Name>Guard convention method (D30),
 	// or -1 when the action declares no guard.
 	guardIdx int
@@ -526,12 +530,11 @@ func resolveActions(v reflect.Value) (map[string]action, error) {
 		if !ok {
 			return nil, fmt.Errorf("allowlisted action %s has no method on %s", name, structName)
 		}
-		takesEvent := m.Type.NumIn() == 2 && m.Type.In(1) == eventType
-		if m.Type.NumOut() != 0 || (m.Type.NumIn() != 1 && !takesEvent) {
-			return nil, fmt.Errorf("allowlisted action %s.%s must have signature func() or func(e liquid.Event), got %s",
-				structName, name, m.Type)
+		takesEvent, payloadArg, err := actionShape(m.Type)
+		if err != nil {
+			return nil, fmt.Errorf("allowlisted action %s.%s %w", structName, name, err)
 		}
-		act := action{idx: m.Index, takesEvent: takesEvent, guardIdx: -1, domains: foldDomains(domainsByAction[name])}
+		act := action{idx: m.Index, takesEvent: takesEvent, payloadArg: payloadArg, guardIdx: -1, domains: foldDomains(domainsByAction[name])}
 		if gm, ok := v.Type().MethodByName(name + "Guard"); ok {
 			// A <Name>Guard convention method (D30) that does not match the
 			// pure-predicate shape is a broken contract, not a silent no-op:
@@ -549,18 +552,88 @@ func resolveActions(v reflect.Value) (map[string]action, error) {
 	return actions, nil
 }
 
-// dispatchArgs builds the argument list for a handler call: the sole
-// liquid.Event a func(e liquid.Event) handler takes (D11), or nil for a bare
-// func() handler.
-func dispatchArgs(act action, r *http.Request, payload map[string]string, reply *eventReply) []reflect.Value {
-	if !act.takesEvent {
-		return nil
+// actionShape validates a handler method's type and reports whether it takes a
+// liquid.Event and its typed payload struct (nil when it takes none). The four
+// accepted shapes (t includes the receiver at In(0)): func(),
+// func(e liquid.Event), func(p <struct>), and func(p <struct>, e liquid.Event)
+// (#105, ADR-0004). Any other shape is a broken compiler contract and fails
+// registration loudly.
+func actionShape(t reflect.Type) (takesEvent bool, payloadArg reflect.Type, err error) {
+	if t.NumOut() == 0 {
+		switch t.NumIn() {
+		case 1: // func()
+			return false, nil, nil
+		case 2:
+			if t.In(1) == eventType { // func(e liquid.Event)
+				return true, nil, nil
+			}
+			if t.In(1).Kind() == reflect.Struct { // func(p <struct>)
+				return false, t.In(1), nil
+			}
+		case 3: // func(p <struct>, e liquid.Event)
+			if t.In(1) != eventType && t.In(1).Kind() == reflect.Struct && t.In(2) == eventType {
+				return true, t.In(1), nil
+			}
+		}
 	}
-	return []reflect.Value{reflect.ValueOf(Event{
-		Ctx:    NewCtx(r, nil),
-		fields: payload,
-		reply:  reply,
-	})}
+	return false, nil, fmt.Errorf("must have signature func(), func(e liquid.Event), func(p <Payload>), or func(p <Payload>, e liquid.Event), got %s", t)
+}
+
+// eventArg builds the liquid.Event a handler receives (D11).
+func eventArg(r *http.Request, payload map[string]string, reply *eventReply) reflect.Value {
+	return reflect.ValueOf(Event{Ctx: NewCtx(r, nil), fields: payload, reply: reply})
+}
+
+// payloadArgs builds a handler's call arguments and, for a typed-payload
+// handler (#105), binds the wire payload into its struct and runs any
+// Validate(). It returns the reflect args to Call, the validation errors (empty
+// unless the payload is a Validator that rejected it), and a bind error (a value
+// that will not bind into the typed struct). For func()/func(e liquid.Event) it
+// is the identity over the pre-#105 behavior with no validation.
+func (a *App) payloadArgs(act action, r *http.Request, payload map[string]string, reply *eventReply) ([]reflect.Value, Errors, error) {
+	if act.payloadArg == nil {
+		if !act.takesEvent {
+			return nil, Errors{}, nil
+		}
+		return []reflect.Value{eventArg(r, payload, reply)}, Errors{}, nil
+	}
+	p := reflect.New(act.payloadArg).Elem()
+	if err := bindStruct(p, payload); err != nil {
+		return nil, Errors{}, err
+	}
+	var errs Errors
+	if v, ok := p.Addr().Interface().(Validator); ok {
+		errs = v.Validate()
+	}
+	args := []reflect.Value{p}
+	if act.takesEvent {
+		args = append(args, eventArg(r, payload, reply))
+	}
+	return args, errs, nil
+}
+
+// runAction enforces the D30 contract, then for a typed-payload handler (#105)
+// binds the payload and runs its Validate(): on failure it surfaces the errors
+// onto the instance and skips the handler; otherwise it calls the handler. It
+// returns ok=false with a client message when the payload is refused (an
+// out-of-contract value, or one that will not bind) — a 400 the caller writes.
+// Callers hold the dispatch lock (D20), as the guard, Validate, and handler may
+// read or mutate component state.
+func (a *App) runAction(st *hydroState, act action, r *http.Request, payload map[string]string, reply *eventReply) (rejectMsg string, ok bool) {
+	if !payloadContractOK(st.inst, act, payload) {
+		return "payload rejected", false
+	}
+	args, valErrs, bindErr := a.payloadArgs(act, r, payload, reply)
+	if bindErr != nil {
+		return "malformed event payload", false
+	}
+	if act.payloadArg != nil {
+		setFormErrors(st.inst, valErrs)
+	}
+	if !valErrs.Any() {
+		st.inst.Method(act.idx).Call(args)
+	}
+	return "", true
 }
 
 // payloadContractOK reports whether the payload satisfies the action's D30
@@ -696,7 +769,6 @@ func (a *App) serveHydroEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	reply := &eventReply{}
-	args := dispatchArgs(act, r, ev.Payload, reply)
 
 	sess.dispatch.Lock()
 	// A deferred instance whose background load has not published yet is not
@@ -707,18 +779,15 @@ func (a *App) serveHydroEvent(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	// D30 value axis: enforce the payload contract after the allowlist and CSRF
-	// and before the handler (D15) — a value outside a field's closed domain,
-	// or one the boundary guard rejects, is refused 400 so the handler never
-	// sees an out-of-contract payload. It runs under the dispatch lock because
-	// the guard may read component state, serializing with this instance's
-	// events (D20).
-	if !payloadContractOK(st.inst, act, ev.Payload) {
+	// Enforce the D30 contract, bind and validate the typed payload, and run the
+	// handler — all under the dispatch lock, in the settled refusal order
+	// (D15/D30/#105). A guard or Validate may read component state, so this
+	// serializes with the instance's other events (D20).
+	if msg, ok := a.runAction(st, act, r, ev.Payload, reply); !ok {
 		sess.dispatch.Unlock()
-		http.Error(w, "payload rejected", http.StatusBadRequest)
+		http.Error(w, msg, http.StatusBadRequest)
 		return
 	}
-	st.inst.Method(act.idx).Call(args)
 	env := Envelope{Redirect: reply.redirect}
 	var renderErr error
 	if env.Redirect == "" {

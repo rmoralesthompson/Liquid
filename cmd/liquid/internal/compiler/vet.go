@@ -443,13 +443,14 @@ func checkHandler(lsxPath, structName string, in structRef, member types.Object)
 	}
 	// Qualify types by bare package name so the signature reads as the
 	// author wrote it (liquid.Event), not as a full import path.
-	d.Message = fmt.Sprintf("%s handler %s has signature %s; a handler is func() or func(e liquid.Event) (D11)",
+	d.Message = fmt.Sprintf("%s handler %s has signature %s; a handler is func(), func(e liquid.Event), func(p <Payload>), or func(p <Payload>, e liquid.Event) (D11, ADR-0004)",
 		in.binding, in.expr, types.TypeString(fn.Type(), func(p *types.Package) string { return p.Name() }))
 	return d
 }
 
-// isHandlerSig reports whether sig is one of the two dispatchable handler
-// shapes D11 allows: func() or func(e liquid.Event).
+// isHandlerSig reports whether sig is a dispatchable handler shape: func() or
+// func(e liquid.Event) (D11), or a typed-payload handler func(p <struct>) or
+// func(p <struct>, e liquid.Event) (#105, ADR-0004).
 func isHandlerSig(sig *types.Signature) bool {
 	if sig.Results().Len() != 0 {
 		return false
@@ -458,9 +459,23 @@ func isHandlerSig(sig *types.Signature) bool {
 	case 0:
 		return true
 	case 1:
-		return isLiquidEvent(sig.Params().At(0).Type())
+		t := sig.Params().At(0).Type()
+		return isLiquidEvent(t) || isPayloadStruct(t)
+	case 2:
+		return isPayloadStruct(sig.Params().At(0).Type()) && isLiquidEvent(sig.Params().At(1).Type())
 	}
 	return false
+}
+
+// isPayloadStruct reports whether t is a typed payload parameter — a struct type
+// other than liquid.Event. This is the shape that lets the compiler see an
+// action's payload without a guard (#105, ADR-0004, closing #85).
+func isPayloadStruct(t types.Type) bool {
+	if isLiquidEvent(t) {
+		return false
+	}
+	_, ok := t.Underlying().(*types.Struct)
+	return ok
 }
 
 // liquidCorePath is the import path liquid.Event resolves at; handler
