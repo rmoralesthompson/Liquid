@@ -282,6 +282,25 @@ func (h *hydroRegistry) expireIdle(now time.Time, idle time.Duration) {
 	}
 }
 
+// drainAll disconnects every live session — stopping each entry's subscription
+// pump and deferred loader and closing every open SSE stream — so in-flight SSE
+// handlers, which return only on their stream closing or their request context
+// ending, unblock during a graceful shutdown. The registry is left empty. Safe
+// on a never-used (nil) registry. Unlike expireIdle/eviction it takes h.mu
+// itself, as it is the entry point for a whole-registry teardown.
+func (h *hydroRegistry) drainAll() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.lru == nil {
+		return
+	}
+	for elem := h.lru.Front(); elem != nil; elem = elem.Next() {
+		elem.Value.(*hydroSession).shutdown()
+	}
+	h.sessions = make(map[string]*list.Element)
+	h.lru = list.New()
+}
+
 // put registers a live instance under its session and hydro tokens,
 // returning the owning session (whose dispatch mutex and streams a
 // subscription pump rides on). Idle sessions are swept first; then a cap
